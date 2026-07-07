@@ -116,7 +116,7 @@ def print_banner(
     dim_gold = "rgb(50,100,180)"
 
     boot_lines = [
-        (f"{_I}Welcome to Sentinel-AI", gold),
+        (f"{_I}Welcome to Platform-Agent", gold),
         (f"{_I}  User: {user_label}", dim_gold),
         (f"{_I}  Model: {model_label}", dim_gold),
         (f"{_I}  Tool runtime: {tool_runtime or 'local filesystem'}", dim_gold),

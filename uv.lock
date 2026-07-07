@@ -2291,6 +2291,88 @@ wheels = [
 ]
 
 [[package]]
+name = "platform-agent"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "apscheduler" },
+    { name = "datasets" },
+    { name = "fastapi" },
+    { name = "fastmcp" },
+    { name = "httpx" },
+    { name = "huggingface-hub" },
+    { name = "litellm" },
+    { name = "nbconvert" },
+    { name = "nbformat" },
+    { name = "prompt-toolkit" },
+    { name = "pydantic" },
+    { name = "pymongo" },
+    { name = "python-dotenv" },
+    { name = "python-multipart" },
+    { name = "requests" },
+    { name = "rich" },
+    { name = "thefuzz" },
+    { name = "uvicorn", extra = ["standard"] },
+    { name = "websockets" },
+    { name = "whoosh" },
+]
+
+[package.optional-dependencies]
+all = [
+    { name = "datasets" },
+    { name = "inspect-ai" },
+    { name = "pandas" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "ruff" },
+    { name = "tenacity" },
+]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "ruff" },
+]
+eval = [
+    { name = "datasets" },
+    { name = "inspect-ai" },
+    { name = "pandas" },
+    { name = "tenacity" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "apscheduler", specifier = ">=3.10,<4" },
+    { name = "datasets", specifier = ">=4.4.1" },
+    { name = "datasets", marker = "extra == 'eval'", specifier = ">=4.3.0" },
+    { name = "fastapi", specifier = ">=0.115.0" },
+    { name = "fastmcp", specifier = ">=3.2.0" },
+    { name = "httpx", specifier = ">=0.27.0" },
+    { name = "huggingface-hub", specifier = ">=1.12.0" },
+    { name = "inspect-ai", marker = "extra == 'eval'", specifier = ">=0.3.149" },
+    { name = "litellm", specifier = ">=1.83.0" },
+    { name = "nbconvert", specifier = ">=7.16.6" },
+    { name = "nbformat", specifier = ">=5.10.4" },
+    { name = "pandas", marker = "extra == 'eval'", specifier = ">=2.3.3" },
+    { name = "platform-agent", extras = ["eval", "dev"], marker = "extra == 'all'" },
+    { name = "prompt-toolkit", specifier = ">=3.0.0" },
+    { name = "pydantic", specifier = ">=2.12.3" },
+    { name = "pymongo", specifier = ">=4.17.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.0.2" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=1.2.0" },
+    { name = "python-dotenv", specifier = ">=1.2.1" },
+    { name = "python-multipart", specifier = ">=0.0.20" },
+    { name = "requests", specifier = ">=2.33.0" },
+    { name = "rich", specifier = ">=13.0.0" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.15.12" },
+    { name = "tenacity", marker = "extra == 'eval'", specifier = ">=8.0.0" },
+    { name = "thefuzz", specifier = ">=0.22.1" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.32.0" },
+    { name = "websockets", specifier = ">=13.0" },
+    { name = "whoosh", specifier = ">=2.7.4" },
+]
+provides-extras = ["eval", "dev", "all"]
+
+[[package]]
 name = "platformdirs"
 version = "4.5.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3377,88 +3459,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/72/d1/d3159231aec234a59
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a6/24/4d91e05817e92e3a61c8a21e08fd0f390f5301f1c448b137c57c4bc6e543/semver-3.0.4-py3-none-any.whl", hash = "sha256:9c824d87ba7f7ab4a1890799cec8596f15c1241cb473404ea1cb0c55e4b04746", size = 17912, upload-time = "2025-01-24T13:19:24.949Z" },
 ]
-
-[[package]]
-name = "sentinel-ai"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "apscheduler" },
-    { name = "datasets" },
-    { name = "fastapi" },
-    { name = "fastmcp" },
-    { name = "httpx" },
-    { name = "huggingface-hub" },
-    { name = "litellm" },
-    { name = "nbconvert" },
-    { name = "nbformat" },
-    { name = "prompt-toolkit" },
-    { name = "pydantic" },
-    { name = "pymongo" },
-    { name = "python-dotenv" },
-    { name = "python-multipart" },
-    { name = "requests" },
-    { name = "rich" },
-    { name = "thefuzz" },
-    { name = "uvicorn", extra = ["standard"] },
-    { name = "websockets" },
-    { name = "whoosh" },
-]
-
-[package.optional-dependencies]
-all = [
-    { name = "datasets" },
-    { name = "inspect-ai" },
-    { name = "pandas" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "ruff" },
-    { name = "tenacity" },
-]
-dev = [
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "ruff" },
-]
-eval = [
-    { name = "datasets" },
-    { name = "inspect-ai" },
-    { name = "pandas" },
-    { name = "tenacity" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "apscheduler", specifier = ">=3.10,<4" },
-    { name = "datasets", specifier = ">=4.4.1" },
-    { name = "datasets", marker = "extra == 'eval'", specifier = ">=4.3.0" },
-    { name = "fastapi", specifier = ">=0.115.0" },
-    { name = "fastmcp", specifier = ">=3.2.0" },
-    { name = "httpx", specifier = ">=0.27.0" },
-    { name = "huggingface-hub", specifier = ">=1.12.0" },
-    { name = "inspect-ai", marker = "extra == 'eval'", specifier = ">=0.3.149" },
-    { name = "litellm", specifier = ">=1.83.0" },
-    { name = "nbconvert", specifier = ">=7.16.6" },
-    { name = "nbformat", specifier = ">=5.10.4" },
-    { name = "pandas", marker = "extra == 'eval'", specifier = ">=2.3.3" },
-    { name = "prompt-toolkit", specifier = ">=3.0.0" },
-    { name = "pydantic", specifier = ">=2.12.3" },
-    { name = "pymongo", specifier = ">=4.17.0" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.0.2" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=1.2.0" },
-    { name = "python-dotenv", specifier = ">=1.2.1" },
-    { name = "python-multipart", specifier = ">=0.0.20" },
-    { name = "requests", specifier = ">=2.33.0" },
-    { name = "rich", specifier = ">=13.0.0" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.15.12" },
-    { name = "sentinel-ai", extras = ["eval", "dev"], marker = "extra == 'all'" },
-    { name = "tenacity", marker = "extra == 'eval'", specifier = ">=8.0.0" },
-    { name = "thefuzz", specifier = ">=0.22.1" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.32.0" },
-    { name = "websockets", specifier = ">=13.0" },
-    { name = "whoosh", specifier = ">=2.7.4" },
-]
-provides-extras = ["eval", "dev", "all"]
 
 [[package]]
 name = "shellingham"

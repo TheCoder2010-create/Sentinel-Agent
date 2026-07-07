@@ -61,7 +61,7 @@ class Config(BaseModel):
 
 USER_CONFIG_ENV_VAR = "SENTINEL_AI_CLI_CONFIG"
 DEFAULT_USER_CONFIG_PATH = (
-    Path.home() / ".config" / "sentinel-ai" / "cli_agent_config.json"
+    Path.home() / ".config" / "platform-agent" / "cli_agent_config.json"
 )
 SLACK_DEFAULT_DESTINATION = "slack.default"
 SLACK_DEFAULT_AUTO_EVENT_TYPES = ["approval_required", "error", "turn_complete"]

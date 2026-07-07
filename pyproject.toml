@@ -1,7 +1,7 @@
 [project]
-name = "sentinel-ai"
+name = "platform-agent"
 version = "0.1.0"
-description = "Sentinel-AI: An autonomous agent for Platform Engineering, AIOps, and MLOps."
+description = "Platform-Agent: An autonomous agent for Platform Engineering, AIOps, and MLOps."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -49,11 +49,11 @@ dev = [
 
 # All dependencies (eval + dev)
 all = [
-    "sentinel-ai[eval,dev]",
+    "platform-agent[eval,dev]",
 ]
 
 [project.scripts]
-sentinel-ai = "agent.main:cli"
+platform-agent = "agent.main:cli"
 
 [build-system]
 requires = ["setuptools>=64"]

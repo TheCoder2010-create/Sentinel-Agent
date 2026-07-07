@@ -1604,7 +1604,7 @@ async def headless_main(
 
 
 def cli():
-    """Entry point for the sentinel-ai CLI command."""
+    """Entry point for the platform-agent CLI command."""
     import logging as _logging
     import warnings
 

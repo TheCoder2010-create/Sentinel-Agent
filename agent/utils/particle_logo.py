@@ -1,7 +1,7 @@
 """Particle coalesce effect for the startup logo.
 
 Random particles swirl in from the edges, converge to form the text
-"WELCOME TO / SENTINEL-AI", hold briefly, then the final frame is printed.
+"WELCOME TO / PLATFORM-AGENT", hold briefly, then the final frame is printed.
 Rendered with braille characters for high detail.
 
 Based on Leandro's particle_coalesce.py demo.
@@ -69,7 +69,7 @@ def run_particle_logo(console: Console, hold_seconds: float = 1.5) -> None:
 
     # Get target positions from text
     text_pixels_line1 = text_to_pixels("WELCOME TO", scale=2)
-    text_pixels_line2 = text_to_pixels("SENTINEL-AI", scale=2)
+    text_pixels_line2 = text_to_pixels("PLATFORM-AGENT", scale=2)
 
     # Calculate dimensions for centering
     def get_bounds(pixels):

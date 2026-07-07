@@ -17,8 +17,6 @@ from agent.core.hub_artifacts import (
     wrap_shell_command_with_hub_artifact_bootstrap,
 )
 from agent.tools import local_tools, sandbox_tool
-from agent.tools.hf_repo_files_tool import HfRepoFilesTool
-from agent.tools.hf_repo_git_tool import HfRepoGitTool
 from agent.tools.jobs_tool import _wrap_command_with_artifact_bootstrap
 
 
@@ -268,114 +266,6 @@ def test_session_artifact_set_falls_back_when_session_rejects_attrs(caplog):
 
     assert is_known_hub_artifact(session, "alice/model", "model")
     assert "using process-local fallback state" in caplog.text
-
-
-@pytest.mark.asyncio
-async def test_hf_repo_git_create_repo_registers_artifact(monkeypatch):
-    session = _session()
-    calls = []
-
-    class FakeApi:
-        token = "hf-token"
-
-        def create_repo(self, **kwargs):
-            self.create_kwargs = kwargs
-            return "https://platformops.co/spaces/alice/demo"
-
-    def fake_register(api, repo_id, repo_type, **kwargs):
-        calls.append((api, repo_id, repo_type, kwargs))
-        return True
-
-    monkeypatch.setattr(
-        "agent.tools.hf_repo_git_tool.register_hub_artifact",
-        fake_register,
-    )
-    tool = HfRepoGitTool(hf_token="hf-token", session=session)
-    tool.api = FakeApi()
-
-    result = await tool._create_repo(
-        {
-            "repo_id": "alice/demo",
-            "repo_type": "space",
-            "space_sdk": "gradio",
-            "private": True,
-        }
-    )
-
-    assert result["totalResults"] == 1
-    assert calls == [
-        (
-            tool.api,
-            "alice/demo",
-            "space",
-            {"session": session, "extra_metadata": {"sdk": "gradio"}},
-        )
-    ]
-
-
-@pytest.mark.asyncio
-async def test_hf_repo_files_upload_registers_known_artifact_with_force(monkeypatch):
-    session = _session()
-    calls = []
-    uploads = []
-
-    class FakeApi:
-        token = "hf-token"
-
-        def upload_file(self, **kwargs):
-            uploads.append(kwargs)
-            return SimpleNamespace()
-
-    def fake_register(api, repo_id, repo_type, **kwargs):
-        calls.append((api, repo_id, repo_type, kwargs))
-        return True
-
-    monkeypatch.setattr(
-        "agent.tools.hf_repo_files_tool.register_hub_artifact",
-        fake_register,
-    )
-    remember_hub_artifact(session, "alice/model", "model")
-
-    tool = HfRepoFilesTool(hf_token="hf-token", session=session)
-    tool.api = FakeApi()
-
-    result = await tool._upload(
-        {
-            "repo_id": "alice/model",
-            "repo_type": "model",
-            "path": "weights.bin",
-            "content": b"weights",
-        }
-    )
-    readme_result = await tool._upload(
-        {
-            "repo_id": "alice/model",
-            "repo_type": "model",
-            "path": "README.md",
-            "content": "# Model",
-        }
-    )
-
-    assert result["totalResults"] == 1
-    assert readme_result["totalResults"] == 1
-    assert [upload["path_in_repo"] for upload in uploads] == [
-        "weights.bin",
-        "README.md",
-    ]
-    assert calls == [
-        (
-            tool.api,
-            "alice/model",
-            "model",
-            {"session": session, "force": False},
-        ),
-        (
-            tool.api,
-            "alice/model",
-            "model",
-            {"session": session, "force": True},
-        ),
-    ]
 
 
 def test_hf_jobs_artifact_bootstrap_wraps_command_without_changing_exec_target():

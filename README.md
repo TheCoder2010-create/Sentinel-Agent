@@ -3,10 +3,10 @@
 </p>
 
 <p align="center">
-    <a href="https://github.com/your-org/sentinel-ai/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/License-Apache_2.0-blue.svg"></a>
+    <a href="https://github.com/Single-Core-Labs/platform-agent/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/License-Apache_2.0-blue.svg"></a>
 </p>
 
-# Sentinel-AI
+# Platform-Agent
 
 An autonomous agent that researches, writes, and ships good quality code and infrastructure configurations for Platform Engineering, AIOps, and MLOps — with deep access to docs, cloud compute, and operations tools.
 
@@ -15,16 +15,16 @@ An autonomous agent that researches, writes, and ships good quality code and inf
 ### Installation
 
 ```bash
-git clone git@github.com:your-org/sentinel-ai.git
-cd sentinel-ai
+git clone https://github.com/Single-Core-Labs/platform-agent.git
+cd platform-agent
 uv sync
 uv tool install -e .
 ```
 
-#### That's it. Now `sentinel-ai` works from any directory:
+#### That's it. Now `platform-agent` works from any directory:
 
 ```bash
-sentinel-ai
+platform-agent
 ```
 
 Create a `.env` file in the project root (or export these in your shell):
@@ -43,26 +43,26 @@ To get a `GITHUB_TOKEN` follow the tutorial [here](https://docs.github.com/en/au
 #### Interactive mode (start a chat session):
 
 ```bash
-sentinel-ai
+platform-agent
 ```
 
 #### Headless mode (single prompt, auto-approve):
 
 ```bash
-sentinel-ai "debug why the production model deployment on k8s is crash-looping"
+platform-agent "debug why the production model deployment on k8s is crash-looping"
 ```
 
 **Options:**
 
 ```bash
-sentinel-ai --sandbox-tools "your prompt"                         # use sandbox tools
-sentinel-ai --max-iterations 100 "your prompt"
-sentinel-ai --no-stream "your prompt"
+platform-agent --sandbox-tools "your prompt"                         # use sandbox tools
+platform-agent --max-iterations 100 "your prompt"
+platform-agent --no-stream "your prompt"
 # Change model
-sentinel-ai --model openai/gpt-4o "your prompt"
+platform-agent --model openai/gpt-4o "your prompt"
 ```
 
-Run `sentinel-ai` then `/model` to see the full list of suggested model ids.
+Run `platform-agent` then `/model` to see the full list of suggested model ids.
 
 #### Local models
 
@@ -71,8 +71,8 @@ agent does not load model weights directly from disk; start your inference
 server first, then select it with a provider-specific model prefix:
 
 ```bash
-sentinel-ai --model ollama/llama3.1:8b "your prompt"
-sentinel-ai --model vllm/meta-llama/Llama-3.1-8B-Instruct "your prompt"
+platform-agent --model ollama/llama3.1:8b "your prompt"
+platform-agent --model vllm/meta-llama/Llama-3.1-8B-Instruct "your prompt"
 ```
 
 Inside interactive mode, switch with `/model`:
@@ -100,7 +100,7 @@ Base URLs may include or omit `/v1`.
 **CLI tool runtime:**
 
 By default, the CLI runs `bash`, `read`, `write`, and `edit` on your local
-filesystem. You can make sandbox tools your CLI default in `~/.config/sentinel-ai/cli_agent_config.json`:
+filesystem. You can make sandbox tools your CLI default in `~/.config/platform-agent/cli_agent_config.json`:
 
 ```json
 { "tool_runtime": "sandbox" }
@@ -111,7 +111,7 @@ your checkout.
 
 ## Supported Gateways
 
-Sentinel-AI currently supports one-way notification gateways from CLI sessions.
+Platform-Agent currently supports one-way notification gateways from CLI sessions.
 These gateways send out-of-band status updates; they do not accept inbound chat
 messages.
 
@@ -138,7 +138,7 @@ SENTINEL_AI_SLACK_ALLOW_AUTO_EVENTS=true
 ```
 
 For a persistent user-level config, put overrides in
-`~/.config/sentinel-ai/cli_agent_config.json` or point `SENTINEL_AI_CLI_CONFIG` at a
+`~/.config/platform-agent/cli_agent_config.json` or point `SENTINEL_AI_CLI_CONFIG` at a
 JSON file:
 
 ```json
