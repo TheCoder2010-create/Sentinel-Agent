@@ -18,6 +18,12 @@ dependencies = [
     "nbconvert>=7.16.6",
     "nbformat>=5.10.4",
     "whoosh>=2.7.4",
+    # Observability / OpenTelemetry
+    "opentelemetry-api>=1.30.0",
+    "opentelemetry-sdk>=1.30.0",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.30.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.30.0",
+    "opentelemetry-semantic-conventions>=0.50b0",
     # Web backend dependencies
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",

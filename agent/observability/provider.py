@@ -7,57 +7,78 @@ import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from opentelemetry import metrics, trace
-from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (
-    OTLPMetricExporter as GrpcMetricExporter,
-)
-from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
-    OTLPSpanExporter as GrpcSpanExporter,
-)
-from opentelemetry.exporter.otlp.proto.http.metric_exporter import (
-    OTLPMetricExporter as HttpMetricExporter,
-)
-from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
-    OTLPSpanExporter as HttpSpanExporter,
-)
-from opentelemetry.sdk.metrics import MeterProvider
-from opentelemetry.sdk.metrics.export import (
-    MetricExporter,
-    PeriodicExportingMetricReader,
-)
-from opentelemetry.sdk.resources import Resource
-from opentelemetry.sdk.trace import TracerProvider, sampling
-from opentelemetry.sdk.trace.export import (
-    BatchSpanProcessor,
-    SimpleSpanProcessor,
-    SpanExporter,
-)
-from opentelemetry.semconv.resource import ResourceAttributes
+from typing import Any
 
 from agent.observability.config import ObservabilityConfig
 
 logger = logging.getLogger(__name__)
 
-# Workaround for OTel Python SDK 1.43.0 / API version gap.
-# SDK expects `TraceFlags.RANDOM_TRACE_ID` which is missing in API 1.43.0.
-try:
-    from opentelemetry.trace import TraceFlags as _OTelTraceFlags
+# ---------------------------------------------------------------------------
+# Optional OTel imports — CLI works without telemetry dependencies.
+# ---------------------------------------------------------------------------
 
-    _OTelTraceFlags.RANDOM_TRACE_ID  # noqa: B018 — test existence
-except AttributeError:
-    _OTelTraceFlags.RANDOM_TRACE_ID = 1  # 0x01 = trace flags bit
+_OTEL_AVAILABLE = False
+metrics: Any = None
+trace: Any = None
+MeterProvider: Any = None
+PeriodicExportingMetricReader: Any = None
+Resource: Any = None
+TracerProvider: Any = None
+sampling: Any = None
+BatchSpanProcessor: Any = None
+SimpleSpanProcessor: Any = None
+ResourceAttributes: Any = None
+GrpcMetricExporter: Any = None
+GrpcSpanExporter: Any = None
+HttpMetricExporter: Any = None
+HttpSpanExporter: Any = None
+
+try:
+    from opentelemetry import metrics, trace
+    from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (
+        OTLPMetricExporter as GrpcMetricExporter,
+    )
+    from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
+        OTLPSpanExporter as GrpcSpanExporter,
+    )
+    from opentelemetry.exporter.otlp.proto.http.metric_exporter import (
+        OTLPMetricExporter as HttpMetricExporter,
+    )
+    from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
+        OTLPSpanExporter as HttpSpanExporter,
+    )
+    from opentelemetry.sdk.metrics import MeterProvider
+    from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
+    from opentelemetry.sdk.resources import Resource
+    from opentelemetry.sdk.trace import TracerProvider, sampling
+    from opentelemetry.sdk.trace.export import (
+        BatchSpanProcessor,
+        SimpleSpanProcessor,
+    )
+    from opentelemetry.semconv.resource import ResourceAttributes
+
+    _OTEL_AVAILABLE = True
+except ImportError:
+    logger.info("OpenTelemetry packages not available — observability disabled")
+
+# Workaround for OTel Python SDK 1.43.0 / API version gap.
+if _OTEL_AVAILABLE:
+    try:
+        from opentelemetry.trace import TraceFlags as _OTelTraceFlags
+        _OTelTraceFlags.RANDOM_TRACE_ID
+    except AttributeError:
+        _OTelTraceFlags.RANDOM_TRACE_ID = 1
 
 # ---------------------------------------------------------------------------
 # Module-level singletons
 # ---------------------------------------------------------------------------
 
-_tracer_provider: TracerProvider | None = None
-_meter_provider: MeterProvider | None = None
-_tracer: trace.Tracer | None = None
-_meter: metrics.Meter | None = None
+_tracer_provider: Any = None
+_meter_provider: Any = None
+_tracer: Any = None
+_meter: Any = None
 _initialized = False
 
-# Prefix for env-var overrides of ObservabilityConfig fields.
 _ENV_PREFIX = "PLATFORM_AGENT_TELEMETRY_"
 
 # ---------------------------------------------------------------------------
@@ -66,10 +87,6 @@ _ENV_PREFIX = "PLATFORM_AGENT_TELEMETRY_"
 
 
 def init_observability(config: ObservabilityConfig) -> None:
-    """Initialise global OTel providers and exporters.
-
-    Idempotent — calling twice is a no-op.
-    """
     global _tracer_provider, _meter_provider, _tracer, _meter, _initialized
 
     if _initialized:
@@ -78,6 +95,11 @@ def init_observability(config: ObservabilityConfig) -> None:
     merged = _apply_env_overrides(config)
     if not merged.enabled:
         logger.info("Observability disabled")
+        _initialized = True
+        return
+
+    if not _OTEL_AVAILABLE:
+        logger.warning("OTel packages not installed — observability disabled")
         _initialized = True
         return
 
@@ -90,7 +112,6 @@ def init_observability(config: ObservabilityConfig) -> None:
         }
     )
 
-    # ── Trace provider ────────────────────────────────────────────────
     if merged.traces_enabled:
         sampler = _build_sampler(merged.sampling_ratio)
         _tracer_provider = TracerProvider(resource=resource, sampler=sampler)
@@ -119,7 +140,6 @@ def init_observability(config: ObservabilityConfig) -> None:
         _tracer_provider = None
         _tracer = None
 
-    # ── Meter provider ────────────────────────────────────────────────
     metric_exporter = _build_metric_exporter(merged)
     _meter_provider = MeterProvider(
         resource=resource,
@@ -141,13 +161,11 @@ def init_observability(config: ObservabilityConfig) -> None:
     )
 
 
-def get_tracer() -> trace.Tracer | None:
-    """Return the global tracer, or None if observability is disabled."""
+def get_tracer() -> Any | None:
     return _tracer
 
 
-def get_meter() -> metrics.Meter | None:
-    """Return the global meter, or None if observability is disabled."""
+def get_meter() -> Any | None:
     return _meter
 
 
@@ -156,7 +174,6 @@ def is_observability_enabled() -> bool:
 
 
 def shutdown_observability() -> None:
-    """Flush and shut down all providers."""
     global _tracer_provider, _meter_provider, _tracer, _meter, _initialized
 
     if _tracer_provider:
@@ -184,7 +201,6 @@ def shutdown_observability() -> None:
 
 
 def _apply_env_overrides(config: ObservabilityConfig) -> ObservabilityConfig:
-    """Override config fields from environment variables."""
     overrides = {}
     for field_name in ("enabled", "traces_enabled", "log_prompts"):
         env_key = _ENV_PREFIX + field_name.upper()
@@ -215,16 +231,14 @@ def _apply_env_overrides(config: ObservabilityConfig) -> ObservabilityConfig:
 
 
 def _get_version() -> str:
-    """Read version from package metadata or fall back to '0.0.0'."""
     try:
         from importlib.metadata import version
-
         return version("platform-agent")
     except Exception:
         return "0.0.0"
 
 
-def _build_sampler(ratio: float) -> sampling.Sampler:
+def _build_sampler(ratio: float) -> Any:
     if ratio >= 1.0:
         return sampling.ALWAYS_ON
     if ratio <= 0.0:
@@ -232,14 +246,14 @@ def _build_sampler(ratio: float) -> sampling.Sampler:
     return sampling.TraceIdRatioBased(ratio)
 
 
-def _build_span_exporter(config: ObservabilityConfig) -> SpanExporter:
+def _build_span_exporter(config: ObservabilityConfig) -> Any:
     if config.otlp_protocol == "http":
         endpoint = config.otlp_endpoint.rstrip("/") + "/v1/traces"
         return HttpSpanExporter(endpoint=endpoint)
     return GrpcSpanExporter(endpoint=config.otlp_endpoint)
 
 
-def _build_metric_exporter(config: ObservabilityConfig) -> MetricExporter:
+def _build_metric_exporter(config: ObservabilityConfig) -> Any:
     if config.outfile:
         return _FileMetricExporter(Path(config.outfile))
     if config.otlp_protocol == "http":
@@ -253,9 +267,7 @@ def _build_metric_exporter(config: ObservabilityConfig) -> MetricExporter:
 # ---------------------------------------------------------------------------
 
 
-class _FileSpanExporter(SpanExporter):
-    """Write spans as JSON lines to a file."""
-
+class _FileSpanExporter:
     def __init__(self, path: Path) -> None:
         self.path = path
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -281,7 +293,7 @@ class _FileSpanExporter(SpanExporter):
                 f.write("\n".join(lines) + "\n")
         except Exception:
             pass
-        return None  # Success
+        return None
 
     def shutdown(self, timeout_millis=30000):
         pass
@@ -290,9 +302,7 @@ class _FileSpanExporter(SpanExporter):
         pass
 
 
-class _FileMetricExporter(MetricExporter):
-    """Write metrics as JSON lines to a file."""
-
+class _FileMetricExporter:
     _preferred_temporality = {}
     _preferred_aggregation = {}
 

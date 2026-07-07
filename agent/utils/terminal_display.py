@@ -9,7 +9,12 @@ from rich.console import Console
 from rich.markup import escape
 from rich.markdown import Heading, Markdown
 from rich.panel import Panel
-from rich.theme import Theme
+
+ANSI_RESET = "\033[0m"
+ANSI_DIM = "\033[2m"
+_ACCENT = "\033[38;2;80;160;255m"
+_DIM_ACCENT = "\033[38;2;50;100;180m"
+_GREEN = "\033[38;2;80;200;120m"
 
 
 class _LeftHeading(Heading):
@@ -60,27 +65,7 @@ def _clip_to_width(s: str, width: int) -> str:
     return "".join(out)
 
 
-_THEME = Theme(
-    {
-        "tool.name": "bold rgb(80,160,255)",
-        "tool.args": "dim",
-        "tool.ok": "dim green",
-        "tool.fail": "dim red",
-        "info": "dim",
-        "muted": "dim",
-        # Markdown emphasis colors
-        "markdown.strong": "bold rgb(80,160,255)",
-        "markdown.emphasis": "italic rgb(50,100,180)",
-        "markdown.code": "rgb(120,220,255)",
-        "markdown.code_block": "rgb(120,220,255)",
-        "markdown.link": "underline rgb(90,180,255)",
-        "markdown.h1": "bold rgb(80,160,255)",
-        "markdown.h2": "bold rgb(130,190,255)",
-        "markdown.h3": "bold rgb(90,150,220)",
-    }
-)
-
-_console = Console(theme=_THEME, highlight=False)
+_console = Console(highlight=False)
 
 # Indent prefix for all agent output (aligns under the `>` prompt)
 _I = "  "
@@ -112,17 +97,14 @@ def print_banner(
     model_label = model or "unknown"
     user_label = user or "not logged in"
 
-    gold = "rgb(80,160,255)"
-    dim_gold = "rgb(50,100,180)"
-
     boot_lines = [
-        (f"{_I}Welcome to Platform-Agent", gold),
-        (f"{_I}  User: {user_label}", dim_gold),
-        (f"{_I}  Model: {model_label}", dim_gold),
-        (f"{_I}  Tool runtime: {tool_runtime or 'local filesystem'}", dim_gold),
-        (f"{_I}  Tools: loading...", dim_gold),
+        (f"{_I}Welcome to Platform-Agent", "rgb(80,160,255)"),
+        (f"{_I}  User: {user_label}", "rgb(50,100,180)"),
+        (f"{_I}  Model: {model_label}", "rgb(50,100,180)"),
+        (f"{_I}  Tool runtime: {tool_runtime or 'local filesystem'}", "rgb(50,100,180)"),
+        (f"{_I}  Tools: loading...", "rgb(50,100,180)"),
         ("", ""),
-        (f"{_I}Type /model to switch · /help · /quit to exit", gold),
+        (f"{_I}Type /model to switch · /help · /quit to exit", "rgb(80,160,255)"),
     ]
 
     run_boot_sequence(_console, boot_lines)
@@ -135,27 +117,16 @@ def print_init_done(tool_count: int = 0) -> None:
     import time
 
     f = _console.file
-    # Overwrite the "Tools: loading..." line with actual count
-    f.write(
-        "\033[A\033[A\033[A\033[K"
-    )  # Move up 3 lines (blank + help + blank) then up to tools line
-    f.write("\033[A\033[K")
-    gold = "\033[38;2;50;100;180m"
-    reset = "\033[0m"
+    f.write("\033[A\033[A\033[A\033[A\033[K\033[A\033[K")
     tool_text = f"{_I}  Tools: {tool_count} loaded"
     for ch in tool_text:
-        f.write(f"{gold}{ch}{reset}")
+        f.write(f"{_DIM_ACCENT}{ch}{ANSI_RESET}")
         f.flush()
         time.sleep(0.012)
     f.write("\n\n")
     # Reprint the help line
-    f.write(
-        f"{_I}\033[38;2;80;160;255m/help for commands · /model to switch · /quit to exit{reset}\n\n"
-    )
-    # Ready message — minimal padding
-    f.write(
-        f"{_I}\033[38;2;80;160;255mReady. Let's build something impressive.{reset}\n"
-    )
+    f.write(f"{_I}{_ACCENT}/help for commands · /model to switch · /quit to exit{ANSI_RESET}\n\n")
+    f.write(f"{_I}{_ACCENT}Ready. Let's build something impressive.{ANSI_RESET}\n")
     f.flush()
 
 
@@ -166,15 +137,12 @@ def print_tool_call(tool_name: str, args_preview: str) -> None:
     import time
 
     f = _console.file
-    # Type out tool name with a brief char-by-char animation
-    gold = "\033[38;2;80;160;255m"
-    reset = "\033[0m"
-    f.write(f"{_I}{gold}▸ ")
+    f.write(f"{_I}{_ACCENT}▸ ")
     for ch in tool_name:
         f.write(ch)
         f.flush()
         time.sleep(0.015)
-    f.write(f"{reset}  \033[2m{args_preview}{reset}\n")
+    f.write(f"{ANSI_RESET}  {ANSI_DIM}{args_preview}{ANSI_RESET}\n")
     f.flush()
 
 
@@ -246,10 +214,9 @@ class SubAgentDisplayManager:
     def _render_completion_line(agent: dict) -> str:
         stats = SubAgentDisplayManager._format_stats(agent)
         label = agent["label"]
-        # dim green check + dim label; stats in parens
-        line = f"{_I}\033[38;2;120;200;140m✓\033[0m \033[2m{label}\033[0m"
+        line = f"{_I}{_GREEN}✓{ANSI_RESET} {ANSI_DIM}{label}{ANSI_RESET}"
         if stats:
-            line += f"  \033[2m({stats})\033[0m"
+            line += f"  {ANSI_DIM}({stats}){ANSI_RESET}"
         return line
 
     @staticmethod
@@ -287,20 +254,19 @@ class SubAgentDisplayManager:
         """
         stats = self._format_stats(agent)
         label = agent["label"]
-        header = f"{_I}\033[38;2;80;160;255m▸ {label}\033[0m"
+        header = f"{_I}{_ACCENT}▸ {label}{ANSI_RESET}"
         if stats:
-            header += f"  \033[2m({stats})\033[0m"
+            header += f"  {ANSI_DIM}({stats}){ANSI_RESET}"
         if compact:
             latest = agent["calls"][-1] if agent["calls"] else ""
             if latest:
-                # Strip long json tails for the inline view
                 short = latest.split("  ")[0] if "  " in latest else latest
-                header += f" \033[2m·\033[0m \033[2m{short}\033[0m"
+                header += f" {ANSI_DIM}·{ANSI_RESET} {ANSI_DIM}{short}{ANSI_RESET}"
             return [header]
         lines = [header]
         visible = agent["calls"][-self._MAX_VISIBLE :]
         for desc in visible:
-            lines.append(f"{_I}  \033[2m{desc}\033[0m")
+            lines.append(f"{_I}  {ANSI_DIM}{desc}{ANSI_RESET}")
         return lines
 
     def _redraw(self) -> None:
@@ -361,7 +327,6 @@ async def print_markdown(
         file=buf,
         width=_console.width,
         highlight=False,
-        theme=_THEME,
         force_terminal=True,
         color_system=_console.color_system or "truecolor",
     )

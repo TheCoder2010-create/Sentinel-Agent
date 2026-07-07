@@ -10,22 +10,34 @@ import time
 from contextlib import contextmanager
 from typing import Any, Generator
 
-from opentelemetry import trace as otel_trace
-from opentelemetry.metrics import Counter, Histogram
-
 from agent.observability.provider import get_meter, get_tracer
+
+# ---------------------------------------------------------------------------
+# Optional OTel imports — CLI works without telemetry dependencies.
+# ---------------------------------------------------------------------------
+
+_OTEL_AVAILABLE = False
+otel_trace: Any = None
+Counter: Any = None
+Histogram: Any = None
+
+try:
+    from opentelemetry import trace as otel_trace
+    _OTEL_AVAILABLE = True
+except ImportError:
+    pass
 
 # ---------------------------------------------------------------------------
 # Lazy-initialised metric instruments (created once on first use)
 # ---------------------------------------------------------------------------
 
-_llm_call_counter: Counter | None = None
-_llm_token_counter: Counter | None = None
-_llm_duration_histogram: Histogram | None = None
-_tool_call_counter: Counter | None = None
-_tool_duration_histogram: Histogram | None = None
-_session_counter: Counter | None = None
-_error_counter: Counter | None = None
+_llm_call_counter: Any = None
+_llm_token_counter: Any = None
+_llm_duration_histogram: Any = None
+_tool_call_counter: Any = None
+_tool_duration_histogram: Any = None
+_session_counter: Any = None
+_error_counter: Any = None
 
 
 def _ensure_instruments() -> None:
@@ -93,21 +105,14 @@ def instrument_llm_call(
     finish_reason: str | None = None,
     cost_usd: float | None = None,
     latency_ms: int | None = None,
-) -> Generator[otel_trace.Span | None, Any, Any]:
-    """Context manager that creates an OTel span and records metrics for an LLM call.
-
-    Usage:
-        with instrument_llm_call(model="gpt-4", kind="main") as span:
-            response = await acompletion(...)
-            if span:
-                span.set_attribute("output_tokens", ...)
-    """
+) -> Generator[Any, Any, Any]:
+    """Context manager that creates an OTel span and records metrics for an LLM call."""
     _ensure_instruments()
 
     tracer = get_tracer()
     span = None
     if tracer is not None:
-        attrs = {
+        attrs: dict[str, Any] = {
             "model": model,
             "kind": kind,
         }
@@ -125,12 +130,12 @@ def instrument_llm_call(
     try:
         yield span
     except Exception as exc:
-        if span:
+        if span is not None:
             span.record_exception(exc)
             span.set_status(otel_trace.Status(otel_trace.StatusCode.ERROR, str(exc)))
         raise
     finally:
-        if span:
+        if span is not None:
             span.end()
 
         if _llm_call_counter is not None:
@@ -168,7 +173,7 @@ def instrument_tool_call(
     *,
     tool_name: str,
     tool_type: str = "builtin",
-) -> Generator[otel_trace.Span | None, Any, Any]:
+) -> Generator[Any, Any, Any]:
     """Context manager that creates an OTel span for a tool call."""
     _ensure_instruments()
 
@@ -184,12 +189,12 @@ def instrument_tool_call(
     try:
         yield span
     except Exception as exc:
-        if span:
+        if span is not None:
             span.record_exception(exc)
             span.set_status(otel_trace.Status(otel_trace.StatusCode.ERROR, str(exc)))
         raise
     finally:
-        if span:
+        if span is not None:
             span.end()
 
         if _tool_call_counter is not None:
