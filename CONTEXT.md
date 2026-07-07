@@ -38,9 +38,8 @@
 │  │  │                                          │  │  │
 │  │  │  ┌──────────────────────────────────┐    │  │  │
 │  │  │  │  ToolRouter                      │    │  │  │
-│  │  │  │  • Job execution / data tools    │    │  │  │
 │  │  │  │  • GitHub code search / read     │    │  │  │
-│  │  │  │  • Sandbox or local tools        │    │  │  │
+│  │  │  │  • Local filesystem tools        │    │  │  │
 │  │  │  │  • Planning / Notify             │    │  │  │
 │  │  │  │  • MCP server tools (dynamic)    │    │  │  │
 │  │  │  └──────────────────────────────────┘    │  │  │
@@ -170,12 +169,10 @@ Plus local tools (bash/read/write/edit) and dynamic MCP tools.
 
 ---
 
-## Current State Assessment
-
-No dedicated k8s/terraform/observability tools exist —
-only generic `bash` tool for infrastructure commands.
-
-### File inventory (agent/tools/)
+## File inventory (agent/tools/)
+- `docs_tools.py` — Documentation search tools
+- `dataset_tools.py` — Dataset inspection
+- `papers_tool.py` — Paper discovery
 - `edit_utils.py` — String replacement helpers
 - `github_find_examples.py` — GitHub example discovery
 - `github_list_repos.py` — GitHub repo listing
@@ -184,7 +181,6 @@ only generic `bash` tool for infrastructure commands.
 - `notify_tool.py` — Slack notifications
 - `plan_tool.py` — Multi-step planning
 - `research_tool.py` — Sub-agent delegation
-- `trackio_seed.py` — Trackio dashboard seeding
 - `types.py` — ToolResult type
 - `utilities.py` — Job formatting helpers
 - `web_search_tool.py` — DuckDuckGo search
