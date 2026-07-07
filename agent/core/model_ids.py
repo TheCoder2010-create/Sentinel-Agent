@@ -1,8 +1,3 @@
-"""Canonical model ids for HF Router inference."""
-
-HF_ROUTER_BASE_URL = "https://router.platformops.co/v1"
-
-# Keep these as verbatim HF Router ids; version punctuation differs by model.
 CLAUDE_OPUS_48_MODEL_ID = "anthropic/claude-opus-4.8:fal-ai"
 GPT_55_MODEL_ID = "openai/gpt-5.5:fal-ai"
 KIMI_K27_CODE_MODEL_ID = "moonshotai/Kimi-K2.7-Code:novita"

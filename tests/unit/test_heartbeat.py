@@ -39,14 +39,12 @@ def _mk_session(tmp_path: Path, monkeypatch) -> Session:
     cm.running_context_usage = 0
     cm.compact_size = 0.1
     cm.untouched_messages = 5
-    cm.hf_token = None
     cm.local_mode = True
     s = Session(
         event_queue=asyncio.Queue(),
         config=_FakeConfig(),
         tool_router=None,
         context_manager=cm,
-        hf_token=None,
         local_mode=True,
     )
     return s
@@ -103,7 +101,6 @@ def test_stable_local_path_overwrites(tmp_path, monkeypatch):
     cm.running_context_usage = 0
     cm.compact_size = 0.1
     cm.untouched_messages = 5
-    cm.hf_token = None
     cm.local_mode = True
 
     s = Session(
@@ -111,7 +108,6 @@ def test_stable_local_path_overwrites(tmp_path, monkeypatch):
         config=_FakeConfig(),
         tool_router=None,
         context_manager=cm,
-        hf_token=None,
         local_mode=True,
     )
 

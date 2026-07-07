@@ -55,11 +55,6 @@ def _cleanup_expired_states() -> None:
 
 def get_redirect_uri(request: Request) -> str:
     """Get the OAuth callback redirect URI."""
-    # In HF Spaces, use the SPACE_HOST if available
-    space_host = os.environ.get("SPACE_HOST")
-    if space_host:
-        return f"https://{space_host}/auth/callback"
-    # Otherwise construct from request
     return str(request.url_for("oauth_callback"))
 
 
@@ -161,13 +156,12 @@ async def oauth_callback(
 
     # Set access token as HttpOnly cookie (not in URL — avoids leaks via
     # Referrer headers, browser history, and server logs)
-    is_production = bool(os.environ.get("SPACE_HOST"))
     response = RedirectResponse(url="/", status_code=302)
     response.set_cookie(
-        key="hf_access_token",
+        key="access_token",
         value=access_token,
         httponly=True,
-        secure=is_production,  # Secure flag only in production (HTTPS)
+        secure=True,
         samesite="lax",
         max_age=3600 * 24 * 7,  # 7 days
         path="/",
@@ -176,7 +170,7 @@ async def oauth_callback(
         key=OAUTH_SCOPE_COOKIE,
         value=oauth_scope_fingerprint(OAUTH_SCOPES),
         httponly=True,
-        secure=is_production,
+        secure=True,
         samesite="lax",
         max_age=3600 * 24 * 7,
         path="/",
@@ -188,7 +182,7 @@ async def oauth_callback(
 async def logout() -> RedirectResponse:
     """Log out the user by clearing the auth cookie."""
     response = RedirectResponse(url="/")
-    response.delete_cookie(key="hf_access_token", path="/")
+    response.delete_cookie(key="access_token", path="/")
     response.delete_cookie(key=OAUTH_SCOPE_COOKIE, path="/")
     return response
 

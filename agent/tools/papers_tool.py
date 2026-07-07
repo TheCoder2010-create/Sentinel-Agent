@@ -402,7 +402,7 @@ def _format_datasets(datasets: list, arxiv_id: str, sort: str) -> str:
 
     if datasets:
         top = datasets[0].get("id", "")
-        lines.append(f'**Inspect top dataset:** hf_inspect_dataset(dataset="{top}")')
+        lines.append(f'**Inspect top dataset:** inspect_dataset(dataset="{top}")')
     return "\n".join(lines)
 
 
@@ -1194,19 +1194,19 @@ _OPERATIONS = {
 # Tool spec + handler
 # ---------------------------------------------------------------------------
 
-HF_PAPERS_TOOL_SPEC = {
-    "name": "hf_papers",
+PAPERS_TOOL_SPEC = {
+    "name": "papers",
     "description": (
         "Discover ML research papers, analyze citations, search paper contents, and find linked resources.\n\n"
-        "Combines HuggingFace Hub, arXiv, and Semantic Scholar. Use for exploring research areas, "
+        "Combines arXiv and Semantic Scholar. Use for exploring research areas, "
         "finding datasets for a task, tracing citation chains, or implementing a paper's approach.\n\n"
         "Typical flows:\n"
-        "  search → read_paper → find_all_resources → hf_inspect_dataset\n"
+        "  search → read_paper → find_all_resources → inspect_dataset\n"
         "  search → paper_details → citation_graph → read_paper (trace influence)\n"
         "  snippet_search → paper_details → read_paper (find specific claims)\n\n"
         "Operations:\n"
         "- trending: Get trending daily papers, optionally filter by topic keyword\n"
-        "- search: Search papers. Uses HF by default (ML-tuned). Add date_from/min_citations/categories to use Semantic Scholar with filters\n"
+        "- search: Search papers. Add date_from/min_citations/categories to use Semantic Scholar with filters\n"
         "- paper_details: Metadata, abstract, AI summary, github link\n"
         "- read_paper: Read paper contents — without section: abstract + TOC; with section: full text\n"
         "- citation_graph: Get references and citations for a paper with influence flags and citation intents\n"
@@ -1303,7 +1303,7 @@ HF_PAPERS_TOOL_SPEC = {
 }
 
 
-async def hf_papers_handler(arguments: dict[str, Any]) -> tuple[str, bool]:
+async def papers_handler(arguments: dict[str, Any]) -> tuple[str, bool]:
     """Handler for agent tool router."""
     operation = arguments.get("operation")
     if not operation:

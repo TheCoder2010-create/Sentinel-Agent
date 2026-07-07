@@ -8,17 +8,13 @@ from typing import Any
 from agent.core.cost_estimation import SPACE_PRICE_USD_PER_HOUR
 
 USAGE_METRICS_VERSION = 1
-BILLING_SCOPE_ACCOUNT_WINDOW_DELTA = "account_window_delta"
 
 _USAGE_SCALAR_KEYS = (
     "usage_total_usd",
     "usage_total_usd_source",
     "usage_app_total_usd",
-    "usage_hf_billing_total_usd",
     "usage_llm_calls",
     "usage_total_tokens",
-    "usage_hf_job_submits",
-    "usage_hf_job_status_snapshots",
     "usage_sandbox_creates",
     "usage_sandbox_pairs",
 )
@@ -94,17 +90,14 @@ def _empty_app_bucket(session_id: str | None) -> dict[str, Any]:
         "session_id": session_id,
         "total_usd": 0.0,
         "inference_usd": 0.0,
-        "hf_jobs_estimated_usd": 0.0,
         "sandbox_estimated_usd": 0.0,
         "llm_calls": 0,
-        "hf_jobs_count": 0,
         "sandbox_count": 0,
         "prompt_tokens": 0,
         "completion_tokens": 0,
         "cache_read_tokens": 0,
         "cache_creation_tokens": 0,
         "total_tokens": 0,
-        "hf_jobs_billable_seconds_estimate": 0,
         "sandbox_billable_seconds_estimate": 0,
     }
 
@@ -197,61 +190,17 @@ def summarize_sandbox_lifecycle(
     }
 
 
-def normalize_hf_billing_snapshot(snapshot: dict[str, Any] | None) -> dict[str, Any]:
-    """Return a dataset-safe HF billing snapshot.
 
-    Only current-session window rollups are retained. Monthly account totals,
-    credit limits, and any caller-provided extra fields are intentionally
-    dropped before the snapshot can be serialized into session artifacts.
-    """
-    hf_billing = snapshot.get("hf_billing") if isinstance(snapshot, dict) else None
-    hf_billing = hf_billing if isinstance(hf_billing, dict) else {}
-    current_session = hf_billing.get("current_session")
-    current_session = current_session if isinstance(current_session, dict) else None
-
-    sanitized_current = None
-    if current_session is not None:
-        sanitized_current = {
-            "window_start": current_session.get("window_start"),
-            "window_end": current_session.get("window_end"),
-            "timezone": current_session.get("timezone"),
-            "total_usd": _round_usd(current_session.get("total_usd")),
-            "inference_providers_usd": _round_usd(
-                current_session.get("inference_providers_usd")
-            ),
-            "hf_jobs_usd": _round_usd(current_session.get("hf_jobs_usd")),
-            "inference_provider_requests": _coerce_int(
-                current_session.get("inference_provider_requests")
-            ),
-            "hf_jobs_minutes": round(
-                _coerce_float(current_session.get("hf_jobs_minutes")), 3
-            ),
-        }
-
-    available = bool(hf_billing.get("available") and sanitized_current is not None)
-    return {
-        "billing_scope": BILLING_SCOPE_ACCOUNT_WINDOW_DELTA,
-        "hf_billing": {
-            "source": str(hf_billing.get("source") or "hf_billing_usage_v2"),
-            "available": available,
-            "error": None if available else hf_billing.get("error"),
-            "current_session": sanitized_current if available else None,
-        },
-    }
 
 
 def summarize_usage_events(
     events: list[dict[str, Any]],
     *,
     session_id: str | None = None,
-    hf_billing_snapshot: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     app = _empty_app_bucket(session_id)
     llm_by_kind: Counter[str] = Counter()
     llm_by_model: Counter[str] = Counter()
-    job_statuses: Counter[str] = Counter()
-    job_submit_flavors: Counter[str] = Counter()
-    job_status_flavors: Counter[str] = Counter()
     sandbox_hardware: Counter[str] = Counter()
     lifecycle_events: list[tuple[int, dict[str, Any]]] = []
 
@@ -259,10 +208,6 @@ def summarize_usage_events(
     events_without_timestamp = 0
     llm_calls_with_cost_usd = 0
     llm_calls_with_nonzero_cost_usd = 0
-    job_submits = 0
-    job_status_snapshots = 0
-    job_snapshots_with_estimated_cost = 0
-    job_snapshots_with_nonzero_estimated_cost = 0
     sandbox_creates = 0
     sandbox_destroys = 0
     turn_complete_count = 0
@@ -303,23 +248,6 @@ def summarize_usage_events(
             app["total_tokens"] += total_tokens
             llm_by_kind[str(data.get("kind") or "unknown")] += 1
             llm_by_model[str(data.get("model") or "unknown")] += 1
-        elif event_type == "hf_job_submit":
-            job_submits += 1
-            job_submit_flavors[str(data.get("flavor") or "unknown")] += 1
-        elif event_type == "hf_job_complete":
-            job_status_snapshots += 1
-            app["hf_jobs_count"] += 1
-            estimated_cost = _coerce_float(data.get("estimated_cost_usd"))
-            app["hf_jobs_estimated_usd"] += estimated_cost
-            app["hf_jobs_billable_seconds_estimate"] += _coerce_int(
-                data.get("billable_seconds_estimate") or data.get("wall_time_s")
-            )
-            if _has_number(data.get("estimated_cost_usd")):
-                job_snapshots_with_estimated_cost += 1
-            if estimated_cost > 0:
-                job_snapshots_with_nonzero_estimated_cost += 1
-            job_statuses[str(data.get("final_status") or "unknown")] += 1
-            job_status_flavors[str(data.get("flavor") or "unknown")] += 1
         elif event_type == "sandbox_create":
             sandbox_creates += 1
             sandbox_hardware[str(data.get("hardware") or "cpu-basic")] += 1
@@ -337,36 +265,21 @@ def summarize_usage_events(
     app["sandbox_estimated_usd"] = sandbox["estimated_usd"]
     app["sandbox_billable_seconds_estimate"] = sandbox["billable_seconds_estimate"]
     app["inference_usd"] = _round_usd(app["inference_usd"])
-    app["hf_jobs_estimated_usd"] = _round_usd(app["hf_jobs_estimated_usd"])
     app["total_usd"] = _round_usd(
         app["inference_usd"]
-        + app["hf_jobs_estimated_usd"]
         + app["sandbox_estimated_usd"]
     )
 
-    billing = normalize_hf_billing_snapshot(hf_billing_snapshot)
-    current_billing = billing["hf_billing"]["current_session"]
-    hf_billing_total = None
-    if billing["hf_billing"]["available"] and current_billing is not None:
-        hf_billing_total = _round_usd(current_billing.get("total_usd"))
-        usage_total = _round_usd(hf_billing_total + app["sandbox_estimated_usd"])
-        usage_total_source = "hf_billing_plus_sandbox_estimate"
-    else:
-        usage_total = app["total_usd"]
-        usage_total_source = "app_telemetry_fallback"
-
-    job_flavors = job_submit_flavors + job_status_flavors
+    usage_total = app["total_usd"]
+    usage_total_source = "app_telemetry_fallback"
 
     return {
         "version": USAGE_METRICS_VERSION,
         "session_id": session_id,
-        "billing_scope": BILLING_SCOPE_ACCOUNT_WINDOW_DELTA,
         "total_usd": usage_total,
         "total_usd_source": usage_total_source,
         "app_total_usd": app["total_usd"],
-        "hf_billing_total_usd": hf_billing_total,
         "app_telemetry": app,
-        "hf_billing": billing["hf_billing"],
         "llm": {
             "calls": app["llm_calls"],
             "calls_by_kind": _counter_dict(llm_by_kind),
@@ -380,20 +293,6 @@ def summarize_usage_events(
         "turns": {
             "turn_complete_count": turn_complete_count,
             "assistant_stream_end_count": assistant_stream_end_count,
-        },
-        "hf_jobs": {
-            "submits": job_submits,
-            "status_snapshots": job_status_snapshots,
-            "statuses": _counter_dict(job_statuses),
-            "flavors": _counter_dict(job_flavors),
-            "submit_flavors": _counter_dict(job_submit_flavors),
-            "status_snapshot_flavors": _counter_dict(job_status_flavors),
-            "estimated_usd": app["hf_jobs_estimated_usd"],
-            "billable_seconds_estimate": app["hf_jobs_billable_seconds_estimate"],
-            "snapshots_with_estimated_cost": job_snapshots_with_estimated_cost,
-            "snapshots_with_nonzero_estimated_cost": (
-                job_snapshots_with_nonzero_estimated_cost
-            ),
         },
         "sandboxes": {
             "creates": sandbox_creates,
@@ -410,10 +309,6 @@ def summarize_usage_events(
             "events_without_timestamp": events_without_timestamp,
             "llm_calls_with_cost_usd": llm_calls_with_cost_usd,
             "llm_calls_with_nonzero_cost_usd": llm_calls_with_nonzero_cost_usd,
-            "job_snapshots_with_estimated_cost": job_snapshots_with_estimated_cost,
-            "job_snapshots_missing_estimated_cost": (
-                job_status_snapshots - job_snapshots_with_estimated_cost
-            ),
         },
     }
 
@@ -421,23 +316,15 @@ def summarize_usage_events(
 def usage_metric_scalar_fields(metrics: dict[str, Any]) -> dict[str, Any]:
     app = metrics.get("app_telemetry") if isinstance(metrics, dict) else {}
     llm = metrics.get("llm") if isinstance(metrics, dict) else {}
-    jobs = metrics.get("hf_jobs") if isinstance(metrics, dict) else {}
     sandboxes = metrics.get("sandboxes") if isinstance(metrics, dict) else {}
     values = {
         "usage_total_usd": metrics.get("total_usd"),
         "usage_total_usd_source": metrics.get("total_usd_source"),
         "usage_app_total_usd": metrics.get("app_total_usd"),
-        "usage_hf_billing_total_usd": metrics.get("hf_billing_total_usd"),
         "usage_llm_calls": app.get("llm_calls") if isinstance(app, dict) else None,
         "usage_total_tokens": llm.get("total_tokens")
         if isinstance(llm, dict)
         else None,
-        "usage_hf_job_submits": (
-            jobs.get("submits") if isinstance(jobs, dict) else None
-        ),
-        "usage_hf_job_status_snapshots": (
-            jobs.get("status_snapshots") if isinstance(jobs, dict) else None
-        ),
         "usage_sandbox_creates": (
             sandboxes.get("creates") if isinstance(sandboxes, dict) else None
         ),

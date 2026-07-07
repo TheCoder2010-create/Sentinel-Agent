@@ -1,9 +1,6 @@
-"""In-process hourly KPI rollup, owned by the backend Space lifespan.
+"""In-process hourly KPI rollup, owned by the backend lifespan.
 
-Replaces an external GitHub Actions cron so the rollup lives next to the data
-and reuses the Space's existing HF token — no production secrets on the
-public source repo. See ``scripts/build_kpis.py`` for the data-flow diagram
-and metric definitions.
+See ``scripts/build_kpis.py`` for the data-flow diagram and metric definitions.
 
 Behaviour::
 
@@ -14,8 +11,6 @@ Behaviour::
 
 Environment::
 
-    HF_KPI_WRITE_TOKEN | HF_SESSION_UPLOAD_TOKEN | HF_TOKEN | HF_ADMIN_TOKEN
-        First one found is used. Least-privilege first.
     KPI_SOURCE_REPO     default smolagents/sentinel-ai-sessions
     KPI_TARGET_REPO     default smolagents/sentinel-ai-kpis
     SENTINEL_AI_KPIS_DISABLED  if truthy, the scheduler is not started
@@ -29,7 +24,7 @@ import logging
 import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Optional
+
 
 logger = logging.getLogger(__name__)
 
@@ -39,20 +34,6 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _background_tasks: set[asyncio.Task] = set()
 
 _scheduler = None  # AsyncIOScheduler instance (lazy import)
-
-
-def _resolve_token() -> Optional[str]:
-    """Pick the first available HF token. Least-privilege first."""
-    for var in (
-        "HF_KPI_WRITE_TOKEN",
-        "HF_SESSION_UPLOAD_TOKEN",
-        "HF_TOKEN",
-        "HF_ADMIN_TOKEN",
-    ):
-        val = os.environ.get(var)
-        if val:
-            return val
-    return None
 
 
 def _load_build_kpis():
@@ -69,18 +50,11 @@ def _load_build_kpis():
 
 async def _run_hour(hour_dt: datetime) -> None:
     """Run one hourly rollup off the event loop. Best-effort, never raises."""
-    token = _resolve_token()
-    if not token:
-        logger.warning("kpis_scheduler: no HF token available, skipping %s", hour_dt)
-        return
     try:
         mod = _load_build_kpis()
-        from huggingface_hub import HfApi
-
-        api = HfApi()
         source = os.environ.get("KPI_SOURCE_REPO", "smolagents/sentinel-ai-sessions")
         target = os.environ.get("KPI_TARGET_REPO", "smolagents/sentinel-ai-kpis")
-        await asyncio.to_thread(mod.run_for_hour, api, source, target, hour_dt, token)
+        await asyncio.to_thread(mod.run_for_hour, None, source, target, hour_dt, None)
     except Exception as e:
         logger.warning("kpis_scheduler: rollup for %s failed: %s", hour_dt, e)
 

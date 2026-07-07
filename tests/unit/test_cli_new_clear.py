@@ -44,7 +44,6 @@ def _make_session() -> Session:
         config=_FakeConfig(),
         tool_router=None,
         context_manager=_FakeContext(),
-        hf_token=None,
         user_id="user-a",
         local_mode=True,
     )

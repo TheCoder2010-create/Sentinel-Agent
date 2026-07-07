@@ -95,7 +95,7 @@ def get_console() -> Console:
 
 def print_banner(
     model: str | None = None,
-    hf_user: str | None = None,
+    user: str | None = None,
     tool_runtime: str | None = None,
 ) -> None:
     """Print particle logo then CRT boot sequence with system info."""
@@ -110,7 +110,7 @@ def print_banner(
     _console.file.flush()
 
     model_label = model or "unknown"
-    user_label = hf_user or "not logged in"
+    user_label = user or "not logged in"
 
     gold = "rgb(80,160,255)"
     dim_gold = "rgb(50,100,180)"
@@ -469,7 +469,7 @@ HELP_ROWS: tuple[tuple[str, str, str], ...] = (
     (
         "/share-traces",
         "[public|private]",
-        "Show or change HF trace visibility",
+        "Show or change trace visibility",
     ),
     ("/quit", "", "Exit"),
 )

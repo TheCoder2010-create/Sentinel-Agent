@@ -81,42 +81,6 @@ def test_tool_success_rate_and_first_action():
     assert m["first_tool_s"] == 65
 
 
-def test_hf_job_gpu_hours():
-    mod = _load()
-    events = [
-        _ev("hf_job_submit", {"flavor": "a100-large", "job_id": "j1"}),
-        _ev(
-            "hf_job_complete",
-            {
-                "flavor": "a100-large",
-                "final_status": "COMPLETED",
-                "wall_time_s": 3600,
-            },
-        ),
-    ]
-    m = mod._session_metrics(_session(events))
-    assert m["hf_jobs_submitted"] == 1
-    assert m["hf_jobs_succeeded"] == 1
-    # a100-large = 1 gpu * 1 hour = 1 gpu-hour
-    assert abs(m["_gpu_hours_by_flavor"]["a100-large"] - 1.0) < 1e-6
-
-
-def test_hf_job_blocked_and_pro_clicks_are_counted():
-    mod = _load()
-    events = [
-        _ev("jobs_access_blocked", {"tool_call_ids": ["tc1"], "plan": "free"}),
-        _ev("pro_cta_click", {"source": "hf_jobs_upgrade_dialog"}),
-        _ev("pro_cta_click", {"source": "claude_cap_dialog"}),
-    ]
-    m = mod._session_metrics(_session(events))
-    assert m["hf_jobs_blocked"] == 1
-    assert m["pro_cta_clicks"] == 2
-    assert m["_pro_cta_by_source"] == {
-        "hf_jobs_upgrade_dialog": 1,
-        "claude_cap_dialog": 1,
-    }
-
-
 def test_pro_conversions_and_credits_topped_up_per_session():
     mod = _load()
     events = [
@@ -331,35 +295,6 @@ def test_breadth_intensity_percentiles_exclude_zero_tool_sessions():
     assert row["distinct_tools_per_session_p50"] == 2.0
     # Median of [2 calls, 4 calls] = 3 (idle sessions filtered).
     assert row["tool_calls_per_session_p50"] == 3.0
-
-
-def test_pro_clicks_and_blocked_jobs_in_aggregate():
-    """The aggregate row keeps pro_cta_clicks + hf_jobs_blocked columns
-    even if the dashboard doesn't currently chart them — they're cheap to
-    keep and downstream consumers may still depend on the schema."""
-    mod = _load()
-    s1 = mod._session_metrics(
-        _session(
-            [
-                _ev("pro_cta_click", {"source": "hf_jobs_upgrade_dialog"}),
-                _ev("pro_cta_click", {"source": "claude_cap_dialog"}),
-                _ev("jobs_access_blocked", {}),
-            ],
-            user_id="u1",
-        )
-    )
-    s2 = mod._session_metrics(
-        _session(
-            [
-                _ev("jobs_access_blocked", {}),
-                _ev("jobs_access_blocked", {}),
-            ],
-            user_id="u2",
-        )
-    )
-    row = mod._aggregate([s1, s2])
-    assert row["pro_cta_clicks"] == 2
-    assert row["hf_jobs_blocked"] == 3
 
 
 def test_aggregate_sessions_by_model_split():

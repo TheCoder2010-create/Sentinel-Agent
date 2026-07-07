@@ -1,5 +1,4 @@
 #!/bin/bash
-# Entrypoint for HF Spaces dev mode compatibility.
 # Dev mode spawns CMD multiple times simultaneously on restart.
 # Only the first instance can bind port 7860 — the rest must exit
 # with code 0 so the dev mode daemon doesn't mark the app as crashed.

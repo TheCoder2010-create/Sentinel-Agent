@@ -195,7 +195,7 @@ export default function AppLayout() {
     if (user?.plan === 'pro' || !activeSessionId) return;
     void apiFetch(`/api/pro-click/${activeSessionId}`, {
       method: 'POST',
-      body: JSON.stringify({ source: 'llm_health_credit_error', target: 'hf_pro' }),
+      body: JSON.stringify({ source: 'llm_health_credit_error', target: 'pro' }),
     }).catch(() => {});
   };
 

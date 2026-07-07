@@ -1,4 +1,4 @@
-"""FastAPI application for HF Agent web interface."""
+"""FastAPI application for Agent web interface."""
 
 import asyncio
 import logging
@@ -34,10 +34,6 @@ async def _flush_session_on_shutdown(sid: str, agent_session, semaphore) -> None
         return
     try:
         async with semaphore:
-            await session_manager.refresh_session_usage_metrics(
-                agent_session,
-                error_code="lifespan_billing_snapshot_error",
-            )
             sess.save_and_upload_detached(sess.config.session_dataset_repo)
             logger.info("Flushed session %s on shutdown", sid)
     except Exception as e:
@@ -47,10 +43,8 @@ async def _flush_session_on_shutdown(sid: str, agent_session, semaphore) -> None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan handler."""
-    logger.info("Starting HF Agent backend...")
+    logger.info("Starting Agent backend...")
     await session_manager.start()
-    # Start in-process hourly KPI rollup. Replaces an external cron so the
-    # rollup lives next to the data and reuses the Space's HF token.
     try:
         import kpis_scheduler
 
@@ -59,7 +53,7 @@ async def lifespan(app: FastAPI):
         logger.warning("KPI scheduler failed to start: %s", e)
     yield
 
-    logger.info("Shutting down HF Agent backend...")
+    logger.info("Shutting down Agent backend...")
     try:
         import kpis_scheduler
 
@@ -83,19 +77,13 @@ async def lifespan(app: FastAPI):
     await session_manager.close()
 
 
-# Disable FastAPI auto-docs when running on HF Spaces (SPACE_ID is set by the
-# platform) to avoid exposing the full API surface to anonymous visitors. Local
-# dev keeps /docs and /redoc available.
-_DOCS_DISABLED = os.environ.get("SPACE_ID") is not None
-
 app = FastAPI(
-    title="HF Agent",
+    title="Agent",
     description="ML Engineering Assistant API",
     version="1.0.0",
     lifespan=lifespan,
-    docs_url=None if _DOCS_DISABLED else "/docs",
-    redoc_url=None if _DOCS_DISABLED else "/redoc",
-    openapi_url=None if _DOCS_DISABLED else "/openapi.json",
+    docs_url="/docs",
+    redoc_url="/redoc",
 )
 
 # CORS middleware for development
@@ -129,7 +117,7 @@ else:
 async def api_root():
     """API root endpoint."""
     return {
-        "name": "HF Agent API",
+        "name": "Agent API",
         "version": "1.0.0",
         "docs": "/docs",
     }

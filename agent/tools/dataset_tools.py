@@ -32,18 +32,18 @@ def _get_headers(token: str | None = None) -> dict:
     return {}
 
 
-async def inspect_dataset(
+async def inspect_dataset_func(
     dataset: str,
     config: str | None = None,
     split: str | None = None,
     sample_rows: int = 3,
-    hf_token: str | None = None,
+    token: str | None = None,
 ) -> ToolResult:
     """
     Get comprehensive dataset info in one call.
     All API calls made in parallel for speed.
     """
-    headers = _get_headers(hf_token)
+    headers = _get_headers(token)
     output_parts = []
     errors = []
 
@@ -384,18 +384,18 @@ def _format_parquet_files(data: dict, max_rows: int = 10) -> str | None:
 
 
 # Tool specification
-HF_INSPECT_DATASET_TOOL_SPEC = {
-    "name": "hf_inspect_dataset",
+INSPECT_DATASET_TOOL_SPEC = {
+    "name": "inspect_dataset",
     "description": (
-        "Inspect a HF dataset in one call: status, configs/splits, schema, sample rows, parquet info.\n\n"
+        "Inspect a dataset in one call: status, configs/splits, schema, sample rows, parquet info.\n\n"
         "REQUIRED before any training job to verify dataset format matches training method:\n"
         "  SFT: needs 'messages', 'text', or 'prompt'/'completion'\n"
         "  DPO: needs 'prompt', 'chosen', 'rejected'\n"
         "  GRPO: needs 'prompt'\n"
-        "All datasets used for training have to be in conversational ChatML format to be compatible with HF libraries.'\n"
+        "All datasets used for training have to be in conversational ChatML format.'\n"
         "Training will fail with KeyError if columns don't match.\n\n"
         "Also use to get example datapoints, understand column names, data types, and available splits before writing any data loading code. "
-        "Supports private/gated datasets when HF_TOKEN is set."
+        "Supports private/gated datasets when a token is set."
     ),
     "parameters": {
         "type": "object",
@@ -423,18 +423,18 @@ HF_INSPECT_DATASET_TOOL_SPEC = {
 }
 
 
-async def hf_inspect_dataset_handler(
+async def inspect_dataset_handler(
     arguments: dict[str, Any], session=None
 ) -> tuple[str, bool]:
     """Handler for agent tool router"""
     try:
-        hf_token = session.hf_token if session else None
-        result = await inspect_dataset(
+        token = session.hf_token if session else None
+        result = await inspect_dataset_func(
             dataset=arguments["dataset"],
             config=arguments.get("config"),
             split=arguments.get("split"),
             sample_rows=min(arguments.get("sample_rows", 3), 10),
-            hf_token=hf_token,
+            token=token,
         )
         return result["formatted"], not result.get("isError", False)
     except Exception as e:

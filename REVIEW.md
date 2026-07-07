@@ -83,7 +83,7 @@ re-flagging.
 Anything in these paths — skip entirely:
 
 - `frontend/node_modules/**`, `**/*.lock`, `uv.lock`, `package-lock.json`
-- `hf_agent.egg-info/**`, `.ruff_cache/**`, `.pytest_cache/**`, `.venv/**`
+- `.ruff_cache/**`, `.pytest_cache/**`, `.venv/**`
 - `session_logs/**`, `reports/**`
 - Anything under a `gen/` or `generated/` path
 

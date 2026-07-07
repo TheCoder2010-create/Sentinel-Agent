@@ -230,7 +230,7 @@ export function useAgentChat({ sessionId, isActive, isProcessing = false, onRead
           return;
         }
 
-        const STREAMABLE_TOOLS = new Set(['hf_jobs', 'sandbox', 'bash']);
+        const STREAMABLE_TOOLS = new Set(['sandbox', 'bash']);
         if (!STREAMABLE_TOOLS.has(tool)) return;
 
         const sessState = useAgentStore.getState().getSessionState(sessionId);
@@ -300,36 +300,14 @@ export function useAgentChat({ sessionId, isActive, isProcessing = false, onRead
         const firstTool = tools[0];
         const args = firstTool.arguments as Record<string, string | undefined>;
 
-        let panelUpdate: Partial<import('@/store/agentStore').PerSessionState> | undefined;
-        if (firstTool.tool === 'hf_jobs' && args.script) {
-          panelUpdate = {
-            panelData: {
-              title: 'Script',
-              script: { content: args.script, language: 'python' },
-              parameters: firstTool.arguments as Record<string, unknown>,
-            },
-            panelView: 'script' as const,
-            panelEditable: true,
-          };
-        } else if (firstTool.tool === 'hf_repo_files' && args.content) {
-          const filename = args.path || 'file';
-          panelUpdate = {
-            panelData: {
-              title: filename.split('/').pop() || 'Content',
-              script: { content: args.content, language: filename.endsWith('.py') ? 'python' : 'text' },
-              parameters: firstTool.arguments as Record<string, unknown>,
-            },
-          };
-        } else {
-          panelUpdate = {
-            panelData: {
-              title: firstTool.tool,
-              output: { content: JSON.stringify(firstTool.arguments, null, 2), language: 'json' },
-            },
-            panelView: 'output' as const,
-          };
-        }
-        if (panelUpdate) updateSession(sessionId, panelUpdate);
+        const panelUpdate: Partial<import('@/store/agentStore').PerSessionState> = {
+          panelData: {
+            title: firstTool.tool,
+            output: { content: JSON.stringify(firstTool.arguments, null, 2), language: 'json' },
+          },
+          panelView: 'output' as const,
+        };
+        updateSession(sessionId, panelUpdate);
 
         if (isActiveRef.current) {
           useLayoutStore.getState().setRightPanelOpen(true);
@@ -337,32 +315,7 @@ export function useAgentChat({ sessionId, isActive, isProcessing = false, onRead
         }
       },
       onToolCallPanel: (toolName: string, args: Record<string, unknown>) => {
-        if (toolName === 'hf_jobs' && args.operation && args.script) {
-          updateSession(sessionId, {
-            panelData: {
-              title: 'Script',
-              script: { content: String(args.script), language: 'python' },
-              parameters: args,
-            },
-            panelView: 'script',
-          });
-          if (isActiveRef.current) {
-            useLayoutStore.getState().setRightPanelOpen(true);
-            useLayoutStore.getState().setLeftSidebarOpen(false);
-          }
-        } else if (toolName === 'hf_repo_files' && args.operation === 'upload' && args.content) {
-          updateSession(sessionId, {
-            panelData: {
-              title: `File Upload: ${String(args.path || 'unnamed')}`,
-              script: { content: String(args.content), language: String(args.path || '').endsWith('.py') ? 'python' : 'text' },
-              parameters: args,
-            },
-          });
-          if (isActiveRef.current) {
-            useLayoutStore.getState().setRightPanelOpen(true);
-            useLayoutStore.getState().setLeftSidebarOpen(false);
-          }
-        } else if (toolName === 'bash' && args.command) {
+        if (toolName === 'bash' && args.command) {
           updateSession(sessionId, {
             panelData: {
               title: 'Sandbox',
@@ -374,14 +327,7 @@ export function useAgentChat({ sessionId, isActive, isProcessing = false, onRead
       },
       onToolOutputPanel: (toolName: string, _toolCallId: string, output: string, success: boolean) => {
         const sessState = useAgentStore.getState().getSessionState(sessionId);
-        if (toolName === 'hf_jobs' && output) {
-          updateSession(sessionId, {
-            panelData: sessState.panelData
-              ? { ...sessState.panelData, output: { content: output, language: 'markdown' } }
-              : { title: 'Output', output: { content: output, language: 'markdown' } },
-            panelView: !success ? 'output' : sessState.panelView,
-          });
-        } else if (toolName === 'bash') {
+        if (toolName === 'bash') {
           if (!success) {
             updateSession(sessionId, { panelView: 'output' });
           }
@@ -765,7 +711,7 @@ export function useAgentChat({ sessionId, isActive, isProcessing = false, onRead
             const state = event.data?.state as string;
             const toolName = event.data?.tool as string;
             if (state === 'running' && toolName) sideChannel.onToolRunning(toolName);
-          } else if (et === 'llm_call' || et === 'hf_job_complete' || et === 'sandbox_destroy') {
+          } else if (et === 'llm_call' || et === 'sandbox_destroy') {
             sideChannel.onUsageEvent(et, (event.data || {}) as Record<string, unknown>);
           } else if (et === 'session_update') {
             const autoApproval = event.data?.auto_approval;

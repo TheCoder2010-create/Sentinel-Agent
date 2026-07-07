@@ -47,70 +47,13 @@ class FakeApprovalSession:
 @pytest.mark.asyncio
 async def test_session_yolo_auto_approves_non_costed_approval_tool():
     decision = await agent_loop._approval_decision(
-        "hf_repo_files",
-        {"operation": "upload", "path": "README.md"},
+        "read",
+        {"path": "README.md"},
         _session(),
     )
 
     assert decision.requires_approval is False
     assert decision.auto_approved is True
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "operation",
-    ["scheduled run", "scheduled uv", "scheduled  run"],
-)
-async def test_scheduled_hf_jobs_always_require_manual_approval(operation):
-    session = _session()
-    session.config.yolo_mode = True
-
-    decision = await agent_loop._approval_decision(
-        "hf_jobs",
-        {"operation": operation, "script": "print(1)"},
-        session,
-    )
-
-    assert decision.requires_approval is True
-    assert decision.auto_approval_blocked is True
-    assert "Scheduled HF jobs" in decision.block_reason
-
-
-@pytest.mark.asyncio
-async def test_immediate_hf_job_under_cap_auto_runs(monkeypatch):
-    async def fake_estimate(*args, **kwargs):
-        return CostEstimate(estimated_cost_usd=2.0, billable=True)
-
-    monkeypatch.setattr(agent_loop, "estimate_tool_cost", fake_estimate)
-
-    decision = await agent_loop._approval_decision(
-        "hf_jobs",
-        {"operation": "run", "hardware_flavor": "a10g-large", "timeout": "1h"},
-        _session(cap=5.0, spent=1.0),
-    )
-
-    assert decision.requires_approval is False
-    assert decision.auto_approved is True
-    assert decision.estimated_cost_usd == 2.0
-
-
-@pytest.mark.asyncio
-async def test_immediate_hf_job_over_cap_falls_back_to_approval(monkeypatch):
-    async def fake_estimate(*args, **kwargs):
-        return CostEstimate(estimated_cost_usd=2.0, billable=True)
-
-    monkeypatch.setattr(agent_loop, "estimate_tool_cost", fake_estimate)
-
-    decision = await agent_loop._approval_decision(
-        "hf_jobs",
-        {"operation": "run", "hardware_flavor": "a10g-large", "timeout": "1h"},
-        _session(cap=5.0, spent=4.0),
-    )
-
-    assert decision.requires_approval is True
-    assert decision.auto_approval_blocked is True
-    assert "exceeds" in decision.block_reason
-    assert decision.remaining_cap_usd == 1.0
 
 
 @pytest.mark.asyncio
@@ -133,32 +76,6 @@ async def test_unknown_cost_falls_back_to_approval(monkeypatch):
     assert decision.requires_approval is True
     assert decision.auto_approval_blocked is True
     assert decision.estimated_cost_usd is None
-
-
-@pytest.mark.asyncio
-async def test_batch_reservation_blocks_second_over_budget_job(monkeypatch):
-    async def fake_estimate(*args, **kwargs):
-        return CostEstimate(estimated_cost_usd=3.0, billable=True)
-
-    monkeypatch.setattr(agent_loop, "estimate_tool_cost", fake_estimate)
-    session = _session(cap=5.0, spent=0.0)
-
-    first = await agent_loop._approval_decision(
-        "hf_jobs",
-        {"operation": "run", "hardware_flavor": "a10g-large"},
-        session,
-        reserved_spend_usd=0.0,
-    )
-    second = await agent_loop._approval_decision(
-        "hf_jobs",
-        {"operation": "run", "hardware_flavor": "a10g-large"},
-        session,
-        reserved_spend_usd=first.estimated_cost_usd or 0.0,
-    )
-
-    assert first.requires_approval is False
-    assert second.requires_approval is True
-    assert second.remaining_cap_usd == 2.0
 
 
 @pytest.mark.asyncio
@@ -219,20 +136,6 @@ async def test_manual_approval_blocks_over_cap_without_recording_spend(monkeypat
     assert decision.allowed is False
     assert "exceeds" in decision.block_reason
     assert session.auto_approval_estimated_spend_usd == 4.5
-
-
-@pytest.mark.asyncio
-async def test_manual_approval_blocks_scheduled_jobs_while_yolo_enabled():
-    session = _session(enabled=True, cap=5.0, spent=0.0)
-
-    decision = await agent_loop._record_manual_approved_spend_if_needed(
-        session,
-        "hf_jobs",
-        {"operation": "scheduled run", "script": "print(1)", "schedule": "@hourly"},
-    )
-
-    assert decision.allowed is False
-    assert "Scheduled HF jobs" in decision.block_reason
 
 
 @pytest.mark.asyncio

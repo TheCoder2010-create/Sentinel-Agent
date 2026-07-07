@@ -412,7 +412,7 @@ export default function ChatInput({ sessionId, initialModelPath, onSend, onStop,
     try {
       await apiFetch(`/api/pro-click/${sessionId}`, {
         method: 'POST',
-        body: JSON.stringify({ source: 'hf_jobs_billing_dialog', target: 'hf_billing' }),
+        body: JSON.stringify({ source: 'jobs_upgrade_dialog', target: 'billing' }),
       });
     } catch {
       /* tracking is best-effort */

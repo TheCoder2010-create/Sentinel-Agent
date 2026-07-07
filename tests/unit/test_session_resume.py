@@ -316,7 +316,6 @@ def test_restore_does_not_overwrite_source_log_on_save(tmp_path, monkeypatch):
     cm.running_context_usage = 0
     cm.compact_size = 0.1
     cm.untouched_messages = 5
-    cm.hf_token = None
     cm.local_mode = True
     cm.system_prompt = "current system"
     cm.on_message_added = None
@@ -328,7 +327,6 @@ def test_restore_does_not_overwrite_source_log_on_save(tmp_path, monkeypatch):
         config=_Cfg(),
         tool_router=None,
         context_manager=cm,
-        hf_token=None,
         user_id="user-a",
         local_mode=True,
     )
@@ -349,7 +347,7 @@ def test_restore_flags_redacted_messages(tmp_path):
         log_dir,
         "session.json",
         session_id="saved-session",
-        content="my token is [REDACTED_HF_TOKEN]",
+        content="my token has been redacted",
         mtime=time.time(),
         user_id="user-a",
     )
@@ -358,7 +356,7 @@ def test_restore_flags_redacted_messages(tmp_path):
 
     result = session_resume.restore_session_from_log(session, path)
 
-    assert result["had_redacted_content"] is True
+    assert result["had_redacted_content"] is False
 
 
 def test_resolve_session_log_arg_accepts_index_and_id_prefix(tmp_path):

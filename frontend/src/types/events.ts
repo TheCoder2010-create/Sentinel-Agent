@@ -14,7 +14,6 @@ export type EventType =
   | 'approval_required'
   | 'tool_state_change'
   | 'llm_call'
-  | 'hf_job_complete'
   | 'sandbox_create'
   | 'sandbox_destroy'
   | 'session_update'

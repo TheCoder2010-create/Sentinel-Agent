@@ -26,30 +26,6 @@ def _load():
     return mod
 
 
-def test_token_resolution_order(monkeypatch):
-    mod = _load()
-    for var in (
-        "HF_KPI_WRITE_TOKEN",
-        "HF_SESSION_UPLOAD_TOKEN",
-        "HF_TOKEN",
-        "HF_ADMIN_TOKEN",
-    ):
-        monkeypatch.delenv(var, raising=False)
-    assert mod._resolve_token() is None
-
-    monkeypatch.setenv("HF_ADMIN_TOKEN", "admin")
-    assert mod._resolve_token() == "admin"
-
-    monkeypatch.setenv("HF_TOKEN", "generic")
-    assert mod._resolve_token() == "generic"
-
-    monkeypatch.setenv("HF_SESSION_UPLOAD_TOKEN", "sessions")
-    assert mod._resolve_token() == "sessions"
-
-    monkeypatch.setenv("HF_KPI_WRITE_TOKEN", "kpis")
-    assert mod._resolve_token() == "kpis"
-
-
 def test_load_build_kpis_exposes_run_for_hour():
     mod = _load()
     bk = mod._load_build_kpis()
@@ -59,7 +35,6 @@ def test_load_build_kpis_exposes_run_for_hour():
 
 def test_backfill_calls_run_hour_for_each_hour(monkeypatch):
     mod = _load()
-    monkeypatch.setenv("HF_KPI_WRITE_TOKEN", "x")
     calls: list[datetime] = []
 
     async def fake_run_hour(hour_dt):

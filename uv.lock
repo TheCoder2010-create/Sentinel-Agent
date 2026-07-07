@@ -2296,11 +2296,9 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "apscheduler" },
-    { name = "datasets" },
     { name = "fastapi" },
     { name = "fastmcp" },
     { name = "httpx" },
-    { name = "huggingface-hub" },
     { name = "litellm" },
     { name = "nbconvert" },
     { name = "nbformat" },
@@ -2342,12 +2340,10 @@ eval = [
 [package.metadata]
 requires-dist = [
     { name = "apscheduler", specifier = ">=3.10,<4" },
-    { name = "datasets", specifier = ">=4.4.1" },
     { name = "datasets", marker = "extra == 'eval'", specifier = ">=4.3.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "fastmcp", specifier = ">=3.2.0" },
     { name = "httpx", specifier = ">=0.27.0" },
-    { name = "huggingface-hub", specifier = ">=1.12.0" },
     { name = "inspect-ai", marker = "extra == 'eval'", specifier = ">=0.3.149" },
     { name = "litellm", specifier = ">=1.83.0" },
     { name = "nbconvert", specifier = ">=7.16.6" },

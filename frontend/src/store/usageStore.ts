@@ -6,49 +6,15 @@ export interface UsageBucket {
   session_id?: string | null;
   total_usd: number;
   inference_usd: number;
-  hf_jobs_estimated_usd: number;
   sandbox_estimated_usd: number;
   llm_calls: number;
-  hf_jobs_count: number;
   sandbox_count: number;
   prompt_tokens: number;
   completion_tokens: number;
   cache_read_tokens: number;
   cache_creation_tokens: number;
   total_tokens: number;
-  hf_jobs_billable_seconds_estimate: number;
   sandbox_billable_seconds_estimate: number;
-}
-
-export interface HfAccountUsageBucket {
-  window_start?: string | null;
-  window_end?: string | null;
-  timezone?: string | null;
-  total_usd: number;
-  inference_providers_usd: number;
-  hf_jobs_usd: number;
-  inference_provider_requests: number;
-  hf_jobs_minutes: number;
-}
-
-export interface HfInferenceProvidersCredits {
-  included_usd: number;
-  used_usd: number;
-  remaining_included_usd: number;
-  limit_usd: number;
-  remaining_limit_usd: number;
-  num_requests: number;
-  period_start?: string | null;
-  period_end?: string | null;
-}
-
-export interface HfAccountUsage {
-  source: 'hf_billing';
-  available: boolean;
-  error?: string | null;
-  current_session: HfAccountUsageBucket | null;
-  month: HfAccountUsageBucket | null;
-  inference_providers_credits: HfInferenceProvidersCredits | null;
 }
 
 export interface SessionAutoApprovalUsage {
@@ -64,12 +30,11 @@ export interface UsageResponse {
   generated_at: string;
   timezone: string;
   session: UsageBucket | null;
-  hf_account?: HfAccountUsage | null;
   auto_approval?: SessionAutoApprovalUsage | null;
   links: Record<string, string>;
 }
 
-type UsageEventType = 'llm_call' | 'hf_job_complete' | 'sandbox_destroy';
+type UsageEventType = 'llm_call' | 'sandbox_destroy';
 
 interface UsageStore {
   usage: UsageResponse | null;
@@ -125,18 +90,8 @@ function applyEventToBucket(
     next.cache_read_tokens += cacheRead;
     next.cache_creation_tokens += cacheCreation;
     next.total_tokens += total;
-  } else if (eventType === 'hf_job_complete') {
-    next.hf_jobs_count += 1;
-    next.hf_jobs_estimated_usd = roundUsd(
-      next.hf_jobs_estimated_usd + numberValue(data.estimated_cost_usd),
-    );
-    next.hf_jobs_billable_seconds_estimate +=
-      intValue(data.billable_seconds_estimate) || intValue(data.wall_time_s);
-  }
-
   next.total_usd = roundUsd(
     next.inference_usd +
-      next.hf_jobs_estimated_usd +
       (next.sandbox_estimated_usd ?? 0),
   );
   return next;

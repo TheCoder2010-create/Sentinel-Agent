@@ -115,9 +115,6 @@ class AgentSession:
     tool_router: ToolRouter
     submission_queue: asyncio.Queue
     user_id: str = "dev"  # Owner of this session
-    hf_username: str | None = None  # HF namespace used for personal trace uploads
-    hf_token: str | None = None  # User's HF OAuth token for tool execution
-    user_plan: str | None = None  # Active HF account plan for plan-aware agent CTAs
     task: asyncio.Task | None = None
     created_at: datetime = field(default_factory=datetime.utcnow)
     # Last genuine activity (submit/turn-start/turn-finish/direct user write).
@@ -179,10 +176,8 @@ class SessionCapacityError(Exception):
 
 
 # ── Capacity limits ─────────────────────────────────────────────────
-# Sized for HF Spaces 8 vCPU / 32 GB RAM.
 # Each session uses ~10-20 MB (context, tools, queues, task); 200 × 20 MB
-# = 4 GB worst case, leaving plenty of headroom for the Python runtime
-# and per-request overhead.
+# = 4 GB worst case.
 MAX_SESSIONS: int = 200
 MAX_SESSIONS_PER_USER: int = 10
 DEFAULT_YOLO_COST_CAP_USD: float = 5.0
@@ -282,9 +277,6 @@ class SessionManager:
         *,
         session_id: str,
         user_id: str,
-        hf_username: str | None,
-        hf_token: str | None,
-        user_plan: str | None,
         model: str | None,
         event_queue: asyncio.Queue,
         notification_destinations: list[str] | None = None,
@@ -293,7 +285,7 @@ class SessionManager:
         import time as _time
 
         t0 = _time.monotonic()
-        tool_router = ToolRouter(self.config.mcpServers, hf_token=hf_token)
+        tool_router = ToolRouter(self.config.mcpServers)
         # Deep-copy config so each session's model switches independently —
         # tab A picking GLM doesn't flip tab B off the default model.
         session_config = self.config.model_copy(deep=True)
@@ -304,10 +296,7 @@ class SessionManager:
             event_queue=event_queue,
             config=session_config,
             tool_router=tool_router,
-            hf_token=hf_token,
             user_id=user_id,
-            hf_username=hf_username,
-            user_plan=user_plan,
             notification_gateway=self.messaging_gateway,
             notification_destinations=notification_destinations or [],
             session_id=session_id,
@@ -496,41 +485,6 @@ class SessionManager:
         except AttributeError:
             pass
 
-    @staticmethod
-    def _usage_spend_from_response(response: dict[str, Any]) -> tuple[float, str]:
-        def coerce_spend(value: Any) -> float | None:
-            if isinstance(value, bool) or value is None:
-                return None
-            try:
-                return max(0.0, float(value))
-            except (TypeError, ValueError):
-                return None
-
-        hf_account = response.get("hf_account")
-        session_bucket = response.get("session")
-        if isinstance(hf_account, dict):
-            current_session = hf_account.get("current_session")
-            if isinstance(current_session, dict):
-                spend = coerce_spend(
-                    current_session.get("inference_providers_usd")
-                    if "inference_providers_usd" in current_session
-                    else current_session.get("total_usd")
-                )
-                if spend is not None:
-                    if isinstance(session_bucket, dict):
-                        for key in (
-                            "hf_jobs_estimated_usd",
-                            "sandbox_estimated_usd",
-                        ):
-                            spend += coerce_spend(session_bucket.get(key)) or 0.0
-                    return spend, "hf_billing_current_session"
-
-        if isinstance(session_bucket, dict):
-            spend = coerce_spend(session_bucket.get("total_usd"))
-            if spend is not None:
-                return spend, "app_telemetry_session"
-        return 0.0, "app_telemetry_session"
-
     async def _current_session_usage_spend(
         self,
         agent_session: AgentSession,
@@ -555,11 +509,16 @@ class SessionManager:
         response = await build_usage_response(
             self,
             user_id=agent_session.user_id,
-            hf_token=agent_session.hf_token,
             session_id=agent_session.session_id,
             timezone_name="UTC",
         )
-        spend, billing_source = self._usage_spend_from_response(response)
+        session_bucket = response.get("session")
+        if isinstance(session_bucket, dict):
+            spend = session_bucket.get("total_usd", 0.0)
+            billing_source = "app_telemetry_session"
+        else:
+            spend = 0.0
+            billing_source = "app_telemetry_session"
         agent_session.usage_warning_spend_cache = {
             "spend_usd": spend,
             "billing_source": billing_source,
@@ -567,72 +526,6 @@ class SessionManager:
             + timedelta(seconds=USAGE_WARNING_SPEND_CACHE_TTL_SECONDS),
         }
         return spend, billing_source
-
-    @staticmethod
-    def _fallback_hf_billing_snapshot(error: str) -> dict[str, Any]:
-        return {
-            "billing_scope": "account_window_delta",
-            "hf_billing": {
-                "source": "hf_billing_usage_v2",
-                "available": False,
-                "error": error,
-                "current_session": None,
-            },
-        }
-
-    async def refresh_session_usage_metrics(
-        self,
-        agent_session: AgentSession,
-        *,
-        error_code: str = "billing_snapshot_error",
-        billing_timeout_s: float | None = USAGE_BILLING_REFRESH_TIMEOUT_SECONDS,
-    ) -> dict[str, Any]:
-        """Refresh the dataset usage snapshot stored on the runtime session."""
-        from agent.core.usage_metrics import (
-            normalize_hf_billing_snapshot,
-            summarize_usage_events,
-        )
-        from usage import build_hf_billing_snapshot
-
-        session = agent_session.session
-        try:
-            billing_snapshot = build_hf_billing_snapshot(
-                self,
-                hf_token=agent_session.hf_token or getattr(session, "hf_token", None),
-                session_id=agent_session.session_id,
-                timezone_name="UTC",
-            )
-            if billing_timeout_s is not None and billing_timeout_s > 0:
-                hf_billing_snapshot = await asyncio.wait_for(
-                    billing_snapshot,
-                    timeout=billing_timeout_s,
-                )
-            else:
-                hf_billing_snapshot = await billing_snapshot
-        except TimeoutError:
-            logger.debug(
-                "HF billing snapshot refresh timed out for %s after %.2fs",
-                agent_session.session_id,
-                billing_timeout_s or 0,
-            )
-            hf_billing_snapshot = self._fallback_hf_billing_snapshot(error_code)
-        except Exception as e:
-            logger.debug(
-                "HF billing snapshot refresh failed for %s: %s",
-                agent_session.session_id,
-                e,
-            )
-            hf_billing_snapshot = self._fallback_hf_billing_snapshot(error_code)
-
-        hf_billing_snapshot = normalize_hf_billing_snapshot(hf_billing_snapshot)
-        session.usage_hf_billing_snapshot = hf_billing_snapshot
-        metrics = summarize_usage_events(
-            getattr(session, "logged_events", []) or [],
-            session_id=agent_session.session_id,
-            hf_billing_snapshot=hf_billing_snapshot,
-        )
-        session.usage_metrics = metrics
-        return metrics
 
     @staticmethod
     def _runtime_session_usage_spend(agent_session: AgentSession) -> float:
@@ -849,56 +742,9 @@ class SessionManager:
         )
 
     @staticmethod
-    def _update_hf_identity(
-        agent_session: AgentSession,
-        *,
-        hf_token: str | None,
-        hf_username: str | None,
-        user_plan: str | None = None,
-    ) -> None:
-        if hf_token:
-            agent_session.hf_token = hf_token
-            agent_session.session.hf_token = hf_token
-        if hf_username:
-            agent_session.hf_username = hf_username
-            agent_session.session.hf_username = hf_username
-        if user_plan is not None:
-            agent_session.user_plan = user_plan
-            agent_session.session.user_plan = user_plan
-
-    @staticmethod
     def _has_active_sandbox_preload(agent_session: AgentSession) -> bool:
         task = getattr(agent_session.session, "sandbox_preload_task", None)
         return bool(task and not task.done())
-
-    @staticmethod
-    def _preload_failed_for_missing_hf_token(agent_session: AgentSession) -> bool:
-        error = getattr(agent_session.session, "sandbox_preload_error", None)
-        return isinstance(error, str) and error.startswith("No HF token available")
-
-    def _restart_cpu_preload_if_token_recovered(
-        self,
-        agent_session: AgentSession,
-        *,
-        preload_sandbox: bool,
-    ) -> None:
-        if not preload_sandbox:
-            return
-        session = agent_session.session
-        if getattr(session, "sandbox", None):
-            return
-        if self._has_active_sandbox_preload(agent_session):
-            return
-        if not (agent_session.hf_token or getattr(session, "hf_token", None)):
-            return
-
-        if not self._preload_failed_for_missing_hf_token(agent_session):
-            return
-
-        session.sandbox_preload_error = None
-        session.sandbox_preload_task = None
-        session.sandbox_preload_cancel_event = None
-        self._start_cpu_sandbox_preload(agent_session)
 
     async def _clear_persisted_sandbox_metadata(self, session_id: str) -> None:
         try:
@@ -912,76 +758,6 @@ class SessionManager:
             )
         except Exception as e:
             logger.warning("Failed to clear sandbox metadata for %s: %s", session_id, e)
-
-    async def _cleanup_persisted_sandbox(
-        self,
-        session_id: str,
-        metadata: dict[str, Any],
-        *,
-        hf_token: str | None,
-    ) -> None:
-        """Delete a sandbox recorded by a previous backend process, if any."""
-        space_id = metadata.get("sandbox_space_id")
-        if not isinstance(space_id, str) or not space_id:
-            return
-        if metadata.get("sandbox_status") == "destroyed":
-            return
-
-        tokens: list[tuple[str, str]] = []
-        seen: set[str] = set()
-        for label, token in (
-            ("user", hf_token),
-            ("admin", os.environ.get("HF_ADMIN_TOKEN")),
-        ):
-            if token and token not in seen:
-                tokens.append((label, token))
-                seen.add(token)
-
-        if not tokens:
-            logger.warning(
-                "Cannot clean persisted sandbox %s for session %s: no HF token available",
-                space_id,
-                session_id,
-            )
-            return
-
-        last_err: Exception | None = None
-        for label, token in tokens:
-            try:
-                from huggingface_hub import HfApi
-
-                api = HfApi(token=token)
-                await asyncio.to_thread(
-                    api.delete_repo,
-                    repo_id=space_id,
-                    repo_type="space",
-                )
-                logger.info(
-                    "Deleted persisted sandbox %s for session %s with %s token",
-                    space_id,
-                    session_id,
-                    label,
-                )
-                await self._clear_persisted_sandbox_metadata(session_id)
-                return
-            except Exception as e:
-                status_code = getattr(getattr(e, "response", None), "status_code", None)
-                if status_code == 404:
-                    logger.info(
-                        "Persisted sandbox %s for session %s is already gone",
-                        space_id,
-                        session_id,
-                    )
-                    await self._clear_persisted_sandbox_metadata(session_id)
-                    return
-                last_err = e
-
-        logger.warning(
-            "Failed to delete persisted sandbox %s for session %s: %s",
-            space_id,
-            session_id,
-            last_err,
-        )
 
     async def persist_session_snapshot(
         self,
@@ -1061,9 +837,6 @@ class SessionManager:
         self,
         session_id: str,
         user_id: str,
-        hf_token: str | None = None,
-        hf_username: str | None = None,
-        user_plan: str | None = None,
         preload_sandbox: bool = True,
     ) -> AgentSession | None:
         """Return a live runtime session, lazily restoring it from Mongo."""
@@ -1071,18 +844,8 @@ class SessionManager:
             existing = self.sessions.get(session_id)
         if existing:
             if self._can_access_session(existing, user_id):
-                self._update_hf_identity(
-                    existing,
-                    hf_token=hf_token,
-                    hf_username=hf_username,
-                    user_plan=user_plan,
-                )
                 self._install_usage_threshold_checker(existing)
                 self._install_yolo_budget_checker(existing)
-                self._restart_cpu_preload_if_token_recovered(
-                    existing,
-                    preload_sandbox=preload_sandbox,
-                )
                 return existing
             return None
 
@@ -1095,18 +858,8 @@ class SessionManager:
             existing = self.sessions.get(session_id)
         if existing:
             if self._can_access_session(existing, user_id):
-                self._update_hf_identity(
-                    existing,
-                    hf_token=hf_token,
-                    hf_username=hf_username,
-                    user_plan=user_plan,
-                )
                 self._install_usage_threshold_checker(existing)
                 self._install_yolo_budget_checker(existing)
-                self._restart_cpu_preload_if_token_recovered(
-                    existing,
-                    preload_sandbox=preload_sandbox,
-                )
                 return existing
             return None
 
@@ -1114,12 +867,6 @@ class SessionManager:
         owner = str(meta.get("user_id") or "")
         if user_id != "dev" and owner != "dev" and owner != user_id:
             return None
-
-        await self._cleanup_persisted_sandbox(
-            session_id,
-            meta,
-            hf_token=hf_token,
-        )
 
         from litellm import Message
 
@@ -1132,9 +879,6 @@ class SessionManager:
             self._create_session_sync,
             session_id=session_id,
             user_id=owner or user_id,
-            hf_username=hf_username,
-            hf_token=hf_token,
-            user_plan=user_plan,
             model=model,
             event_queue=event_queue,
             notification_destinations=meta.get("notification_destinations") or [],
@@ -1217,9 +961,6 @@ class SessionManager:
             tool_router=tool_router,
             submission_queue=submission_queue,
             user_id=owner or user_id,
-            hf_username=hf_username,
-            hf_token=hf_token,
-            user_plan=user_plan,
             created_at=created_at,
             usage_window_started_at=usage_window_started_at,
             inference_billing_session_id=inference_billing_session_id,
@@ -1236,12 +977,6 @@ class SessionManager:
             tool_router=tool_router,
         )
         if started is not agent_session:
-            self._update_hf_identity(
-                started,
-                hf_token=hf_token,
-                hf_username=hf_username,
-                user_plan=user_plan,
-            )
             return started
         if preload_sandbox:
             self._start_cpu_sandbox_preload(agent_session)
@@ -1251,23 +986,17 @@ class SessionManager:
     async def create_session(
         self,
         user_id: str = "dev",
-        hf_username: str | None = None,
-        hf_token: str | None = None,
-        user_plan: str | None = None,
         model: str | None = None,
         is_pro: bool | None = None,
     ) -> str:
         """Create a new agent session and return its ID.
 
         Session() and ToolRouter() constructors contain blocking I/O
-        (e.g. HfApi().whoami(), litellm.get_max_tokens()) so they are
+        (e.g. litellm.get_max_tokens()) so they are
         executed in a thread pool to avoid freezing the async event loop.
 
         Args:
             user_id: The ID of the user who owns this session.
-            hf_username: The HF username/namespace used for personal trace uploads.
-            hf_token: The user's HF OAuth token, stored for tool execution.
-            user_plan: The active HF account plan used for plan-aware agent CTAs.
             model: Optional model override. When set, replaces ``model_name``
                 on the per-session config clone. None falls back to the
                 config default.
@@ -1316,9 +1045,6 @@ class SessionManager:
                 self._create_session_sync,
                 session_id=session_id,
                 user_id=user_id,
-                hf_username=hf_username,
-                hf_token=hf_token,
-                user_plan=user_plan,
                 model=model,
                 event_queue=event_queue,
             )
@@ -1330,9 +1056,6 @@ class SessionManager:
                 tool_router=tool_router,
                 submission_queue=submission_queue,
                 user_id=user_id,
-                hf_username=hf_username,
-                hf_token=hf_token,
-                user_plan=user_plan,
             )
             self._install_usage_threshold_checker(agent_session)
             self._install_yolo_budget_checker(agent_session)
@@ -1434,7 +1157,6 @@ class SessionManager:
             summary, _ = await summarize_messages(
                 parsed,
                 model_name=session.config.model_name,
-                hf_token=session.hf_token,
                 max_tokens=4000,
                 prompt=_RESTORE_PROMPT,
                 tool_specs=tool_specs,
@@ -1701,8 +1423,6 @@ class SessionManager:
                             # than the idle window would otherwise be reaped the
                             # instant it completes.
                             self._touch(agent_session)
-                            if session.config.save_sessions:
-                                await self.refresh_session_usage_metrics(agent_session)
                             await self.persist_session_snapshot(agent_session)
                         if not should_continue:
                             break
@@ -1731,10 +1451,6 @@ class SessionManager:
             # Idempotent via session_id key; detached subprocess.
             if session.config.save_sessions:
                 try:
-                    await self.refresh_session_usage_metrics(
-                        agent_session,
-                        error_code="final_billing_snapshot_error",
-                    )
                     session.save_and_upload_detached(
                         session.config.session_dataset_repo
                     )

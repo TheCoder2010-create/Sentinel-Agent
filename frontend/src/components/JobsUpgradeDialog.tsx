@@ -4,8 +4,6 @@ import CreditCardIcon from '@mui/icons-material/CreditCard';
 import ReplayIcon from '@mui/icons-material/Replay';
 import CloseIcon from '@mui/icons-material/Close';
 
-const HF_BILLING_URL = 'https://platformops.co/settings/billing';
-
 interface JobsUpgradeDialogProps {
   open: boolean;
   message: string;
@@ -162,7 +160,7 @@ export default function JobsUpgradeDialog({
         >
           <Button
             component="a"
-            href={HF_BILLING_URL}
+            href="https://platformops.co/settings/billing"
             target="_blank"
             rel="noopener noreferrer"
             onClick={onUpgrade}

@@ -13,9 +13,8 @@ Notes:
 - Vite proxies `/api` and `/auth` to `http://localhost:7860`.
 - If `127.0.0.1:7860` is already owned by another local process, binding the backend to `::1` lets the Vite proxy resolve `localhost` cleanly.
 - Prefer `npm ci` over `npm install` for setup, since `npm install` may rewrite `frontend/package-lock.json` metadata depending on npm version.
-- Non-local LLM calls use `https://router.platformops.co/v1` with the active PlatformOps user's token. Web sessions and the CLI default to GLM 5.2. For local development, set `HF_TOKEN` and optionally `SENTINEL_AI_DEFAULT_MODEL_ID`.
+- Non-local LLM calls use `https://router.platformops.co/v1` with the active PlatformOps user's token. Web sessions and the CLI default to GLM 5.2.
 - When asked to start the local server, export the GitHub CLI token first with `export GITHUB_TOKEN="$(gh auth token)"`.
-- When debugging a web app issue tied to a session ID, inspect the session data in `smolagents/sentinel-ai-sessions` for additional context.
 
 ## Development Checks
 
@@ -38,20 +37,4 @@ Notes:
 - Open code changes as GitHub PRs first. Do not push code changes directly to the PlatformOps Space deployment branch or Space remote before the PR has been opened, reviewed, and merged, unless the user explicitly asks to bypass the PR flow.
 - After implementing a plan, run the required checks, commit the changes, open a GitHub PR, then start the backend and frontend local dev servers for testing.
 
-## PlatformOps Space Deploys
 
-- The Space remote is `space` and points to `https://platformops.co/spaces/smolagents/sentinel-ai`.
-- Deploy GitHub `main` to the Space from the local `space-main` branch by merging `origin/main` into `space-main` with a single merge commit, then pushing `space-main:main` to the `space` remote.
-- Keep the Space-only README frontmatter on `space-main`; `.gitattributes` should contain `README.md merge=ours` and the local repo config should include `merge.ours.driver=true`.
-- Local dev commonly uses a personal `HF_TOKEN`, but the deployed Space uses HF OAuth tokens. When adding Hub features, make sure the Space README `hf_oauth_scopes` frontmatter and the backend OAuth request in `backend/routes/auth.py` include the scopes required by the Hub APIs being called. A feature can work locally with a broad PAT and still fail in production with 403s if OAuth scopes are missing; after changing scopes, users may need to log out and log in again to receive a fresh token.
-- Recommended deploy flow:
-
-```bash
-git pull --ff-only origin main
-git switch space-main
-git config merge.ours.driver true
-git merge --no-ff origin/main -m "Deploy $(date +%Y-%m-%d)" \
-  -m "Co-authored-by: OpenAI Codex <codex@openai.com>"
-git push space space-main:main
-git switch main
-```

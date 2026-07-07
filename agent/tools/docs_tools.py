@@ -1,5 +1,5 @@
 """
-Documentation search tools for exploring HuggingFace and Gradio documentation.
+Documentation search tools for exploring PlatformOps and Gradio documentation.
 """
 
 import asyncio
@@ -286,7 +286,7 @@ def _format_results(
 # ---------------------------------------------------------------------------
 
 
-async def explore_hf_docs_handler(
+async def explore_docs_handler(
     arguments: dict[str, Any], session=None
 ) -> tuple[str, bool]:
     """Explore documentation structure with optional search query."""
@@ -316,10 +316,9 @@ async def explore_hf_docs_handler(
         except Exception as e:
             return f"Error fetching Gradio docs: {str(e)}", False
 
-    # HF docs
     hf_token = session.hf_token if session else None
     if not hf_token:
-        return "Error: No HF token available (not logged in)", False
+        return "Error: No token available (not logged in)", False
 
     try:
         max_results_int = int(max_results) if max_results is not None else None
@@ -379,7 +378,7 @@ async def explore_hf_docs_handler(
         return f"Unexpected error: {str(e)}", False
 
 
-async def hf_docs_fetch_handler(
+async def docs_fetch_handler(
     arguments: dict[str, Any], session=None
 ) -> tuple[str, bool]:
     """Fetch full markdown content of a documentation page."""
@@ -389,7 +388,7 @@ async def hf_docs_fetch_handler(
 
     hf_token = session.hf_token if session else None
     if not hf_token:
-        return "Error: No HF token available (not logged in)", False
+        return "Error: No token available (not logged in)", False
 
     if not url.endswith(".md"):
         url = f"{url}.md"
@@ -418,7 +417,7 @@ async def hf_docs_fetch_handler(
 
 
 async def _fetch_openapi_spec() -> dict[str, Any]:
-    """Fetch and cache HuggingFace OpenAPI specification."""
+    """Fetch and cache PlatformOps OpenAPI specification."""
     global _openapi_cache
     if _openapi_cache is not None:
         return _openapi_cache
@@ -601,7 +600,7 @@ def _generate_curl_example(endpoint: dict[str, Any]) -> str:
         example = param.get("example", param.get("schema", {}).get("example", "value"))
         curl += f"?{param['name']}={example}"
 
-    curl += " \\\n  -H 'Authorization: Bearer $HF_TOKEN'"
+    curl += " \\\n  -H 'Authorization: Bearer $TOKEN'"
 
     # Add request body
     if method in ["POST", "PUT", "PATCH"] and endpoint.get("request_body"):
@@ -735,7 +734,7 @@ def _format_openapi_results(
 
 
 async def search_openapi_handler(arguments: dict[str, Any]) -> tuple[str, bool]:
-    """Search HuggingFace OpenAPI specification by query and/or tag."""
+    """Search PlatformOps OpenAPI specification by query and/or tag."""
     tag = arguments.get("tag", "").strip() or None
     query = arguments.get("query", "").strip() or None
 
@@ -789,16 +788,16 @@ async def _get_api_search_tool_spec() -> dict[str, Any]:
     tags = _extract_all_tags(spec)
 
     return {
-        "name": "find_hf_api",
+        "name": "find_api",
         "description": (
-            "Find HuggingFace Hub REST API endpoints to make HTTP requests. Returns curl examples with authentication. "
-            "⚠️ USE THIS TOOL when you need to call the HF Hub API directly - for operations like: "
+            "Find REST API endpoints to make HTTP requests. Returns curl examples with authentication. "
+            "⚠️ USE THIS TOOL when you need to call the API directly - for operations like: "
             "uploading/downloading files, managing repos, listing models/datasets, getting user info, "
             "managing webhooks, collections, discussions, or any Hub interaction not covered by other tools. "
             "**Use cases:** (1) 'Stream Space logs' → query='space logs', "
             "(2) 'Get Space metrics/Zero-GPU usage' → query='space metrics', "
             "(3) 'List organization members' → query='organization members', "
-            "(4) 'Generate repo access token' → query='jwt token', "
+            "(4) 'Generate access token' → query='jwt token', "
             "(5) 'Check repo security scan' → query='security scan'. "
             "**Search modes:** Use 'query' for keyword search, 'tag' to browse a category, or both. "
             "If query finds no results, falls back to showing all endpoints in the tag. "
@@ -841,7 +840,7 @@ DOC_ENDPOINTS = [
     "gradio",
     "trackio",
     "smolagents",
-    "huggingface_hub",
+    "platformops",
     "platformops.js",
     "transformers.js",
     "inference-providers",
@@ -876,13 +875,13 @@ DOC_ENDPOINTS = [
     "google-cloud",
 ]
 
-EXPLORE_HF_DOCS_TOOL_SPEC = {
-    "name": "explore_hf_docs",
+EXPLORE_DOCS_TOOL_SPEC = {
+        "name": "explore_docs",
     "description": (
-        "Browse HF documentation structure — discover all available documentation with 200-char previews.\n\n"
+        "Browse documentation structure — discover all available documentation with 200-char previews.\n\n"
         "Use this to find relevant documentation and/or examples with detailed parameter docs and API reference. "
         "To be used together with github_find_examples and github_read_file to find working examples and documentation.\n\n"
-        "Pattern: explore_hf_docs (find relevant pages) → fetch_hf_docs (get full content).\n\n"
+        "Pattern: explore_docs (find relevant pages) → fetch_docs (get full content).\n\n"
         "For training tasks: fetch the trainer config docs (SFTConfig, DPOConfig, GRPOConfig) to verify parameter names. "
         "Returns top 20 results by default; set max_results (max 50) to adjust."
     ),
@@ -902,11 +901,11 @@ EXPLORE_HF_DOCS_TOOL_SPEC = {
                     "• gradio — UI components and demos for ML models. Uses Gradio's native API: without query returns full docs (llms.txt), with query uses embedding search for precise results.\n"
                     "• trackio — Experiment tracking, metrics logging, and run comparison.\n"
                     "• smolagents — Lightweight agent abstractions and tool-using patterns.\n"
-                    "• huggingface_hub — Python client for Hub operations (auth, upload/download, repo management).\n"
+                    "• platformops — Python client for Hub operations (auth, upload/download, repo management).\n"
                     "• platformops.js — JS/TS client for Hub APIs in browser and Node.\n"
                     "• transformers.js — Run Transformer models in browser/Node via WebGPU/WASM.\n"
                     "• inference-providers — Unified interface for third-party inference backends.\n"
-                    "• inference-endpoints — Managed, scalable model deployments on HF infrastructure.\n"
+                    "• inference-endpoints — Managed, scalable model deployments.\n"
                     "• peft — Parameter-efficient fine-tuning methods (LoRA, adapters, etc.).\n"
                     "• accelerate — Hardware-agnostic, distributed and mixed-precision training orchestration.\n"
                     "• optimum — Hardware-aware optimization and model export tooling, including Habana, Neuron, Intel, ExecuTorch, and TPU variants.\n"
@@ -917,7 +916,7 @@ EXPLORE_HF_DOCS_TOOL_SPEC = {
                     "• trl — RLHF, DPO, PPO, and SFT utilities for LLMs.\n"
                     "• simulate — Experimental simulation tools and workflows.\n"
                     "• sagemaker — Deploying PlatformOps models on AWS SageMaker.\n"
-                    "• timm — Image model zoo and utilities via HF integrations.\n"
+                    "• timm — Image model zoo and utilities.\n"
                     "• safetensors — Safe, fast tensor serialization format.\n"
                     "• tgi — High-throughput text generation server for LLMs.\n"
                     "• setfit — Few-shot text classification via sentence embeddings.\n"
@@ -954,13 +953,13 @@ EXPLORE_HF_DOCS_TOOL_SPEC = {
     },
 }
 
-HF_DOCS_FETCH_TOOL_SPEC = {
-    "name": "fetch_hf_docs",
+DOCS_FETCH_TOOL_SPEC = {
+        "name": "fetch_docs",
     "description": (
-        "Fetch full markdown content of an HF documentation page. Use after explore_hf_docs.\n\n"
+        "Fetch full markdown content of a documentation page. Use after explore_docs.\n\n"
         "Critical for finding documentation e.g. current trainer configuration parameters (SFTConfig, DPOConfig, etc.) "
-        "Use for researching solutions and before writing training scripts. Your internal knowledge is outdated.\n\n"
-        "Provide the full URL from explore_hf_docs results. The .md extension is added automatically."
+        "Use for researching solutions and before writing training scripts.\n\n"
+        "Provide the full URL from explore_docs results. The .md extension is added automatically."
     ),
     "parameters": {
         "type": "object",

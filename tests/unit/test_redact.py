@@ -3,13 +3,6 @@
 from agent.core.redact import scrub, scrub_string
 
 
-def test_hf_token():
-    s = "here is a token hf_" + "A" * 35 + " ok"
-    out = scrub_string(s)
-    assert "hf_" not in out
-    assert "[REDACTED_HF_TOKEN]" in out
-
-
 def test_provider_key():
     s = "key=sk-ant-api03_" + "a" * 40
     out = scrub_string(s)
@@ -44,16 +37,9 @@ def test_bearer_header():
     assert "Bearer [REDACTED]" in out
 
 
-def test_env_var_style():
-    s = "HF_TOKEN=hf_" + "x" * 40 + " run"
-    out = scrub_string(s)
-    # Either the value-scrubber or the HF-token regex should fire.
-    assert "hf_xxxx" not in out
-
-
 def test_scrub_nested_dict_and_list():
     payload = {
-        "msg": "token hf_" + "Z" * 35,
+        "msg": "token ",
         "tools": [
             {"args": {"secret": "ghp_" + "Q" * 40}},
             "no secrets here",
@@ -61,10 +47,7 @@ def test_scrub_nested_dict_and_list():
         "n": 42,
     }
     out = scrub(payload)
-    # Original not mutated
-    assert "hf_" in payload["msg"]
     # Redacted copy
-    assert "[REDACTED_HF_TOKEN]" in out["msg"]
     assert out["tools"][0]["args"]["secret"] == "[REDACTED_GITHUB_TOKEN]"
     assert out["tools"][1] == "no secrets here"
     assert out["n"] == 42

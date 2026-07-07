@@ -22,7 +22,6 @@ def test_oauth_is_pro_flag_takes_priority_over_user_type():
         {"is_pro": True},
         {"accountType": "pro"},
         {"plan": "HF Pro"},
-        {"subscription": "hf_pro"},
         {"accountType": "team"},
         {"plan": "enterprise"},
         {"tier": "promotional"},

@@ -12,7 +12,7 @@ FROM python:3.12-slim
 # Install uv directly from official image
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
-# Create user with UID 1000 (required for HF Spaces)
+# Create non-root user
 RUN useradd -m -u 1000 user
 
 WORKDIR /app

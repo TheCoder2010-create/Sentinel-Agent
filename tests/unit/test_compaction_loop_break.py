@@ -175,7 +175,6 @@ async def test_compact_raises_when_post_compact_still_over_threshold():
             await cm.compact(
                 model_name=ROUTER_CLAUDE,
                 tool_specs=None,
-                hf_token=None,
                 session=None,
             )
 
@@ -221,7 +220,6 @@ async def test_compact_does_not_duplicate_system_when_idx_is_zero():
         await cm.compact(
             model_name=ROUTER_CLAUDE,
             tool_specs=None,
-            hf_token=None,
             session=None,
         )
 
@@ -286,8 +284,7 @@ async def test_compact_succeeds_when_post_compact_under_threshold():
         await cm.compact(
             model_name=ROUTER_CLAUDE,
             tool_specs=None,
-            hf_token=None,
-            session=None,
+                session=None,
         )
     assert cm.running_context_usage == 5_000
 
@@ -308,7 +305,6 @@ async def test_compact_and_notify_terminates_session_on_failure():
     session.session_id = "sess-123"
     session.is_running = True
     session.config.model_name = ROUTER_CLAUDE
-    session.hf_token = None
     session.tool_router.get_tool_specs_for_llm.return_value = []
     session.send_event = AsyncMock()
 
@@ -344,7 +340,6 @@ async def test_compact_and_notify_passes_through_on_success():
     session.session_id = "sess-456"
     session.is_running = True
     session.config.model_name = ROUTER_CLAUDE
-    session.hf_token = None
     session.tool_router.get_tool_specs_for_llm.return_value = []
     session.send_event = AsyncMock()
 

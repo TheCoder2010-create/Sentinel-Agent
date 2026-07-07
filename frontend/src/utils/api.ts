@@ -1,7 +1,7 @@
 /**
  * Centralized API utilities.
  *
- * In production: HttpOnly cookie (hf_access_token) is sent automatically.
+ * In production: HttpOnly cookie (access_token) is sent automatically.
  * In development: auth is bypassed on the backend.
  */
 

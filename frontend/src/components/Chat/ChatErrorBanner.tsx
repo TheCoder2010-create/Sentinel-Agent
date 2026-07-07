@@ -49,7 +49,7 @@ export default function ChatErrorBanner({ error, sessionId, model, onDismiss }: 
     if (userPlan === 'pro') return;
     void apiFetch(`/api/pro-click/${sessionId}`, {
       method: 'POST',
-      body: JSON.stringify({ source: 'inference_credit_error', target: 'hf_pro' }),
+      body: JSON.stringify({ source: 'inference_credit_error', target: 'pro' }),
     }).catch(() => {});
   };
 

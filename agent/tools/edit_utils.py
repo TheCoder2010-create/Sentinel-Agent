@@ -258,16 +258,4 @@ def validate_python(content: str, path: str = "") -> list[str]:
         warnings.append(f"Python syntax error at line {e.lineno}: {e.msg}")
         return warnings
 
-    # 2. Training script heuristics
-    if any(
-        kw in content
-        for kw in ("TrainingArguments", "SFTConfig", "DPOConfig", "GRPOConfig")
-    ):
-        if "push_to_hub" not in content:
-            warnings.append(
-                "Training script warning: no 'push_to_hub' found — model may be lost when job ends"
-            )
-        if "hub_model_id" not in content:
-            warnings.append("Training script warning: no 'hub_model_id' found")
-
     return warnings

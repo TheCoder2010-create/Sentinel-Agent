@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Box, Stack, Typography, Chip, Button, TextField, IconButton, Link, CircularProgress } from '@mui/material';
+import { Alert, Box, Stack, Typography, Chip, Button, TextField, IconButton, CircularProgress } from '@mui/material';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
-import LaunchIcon from '@mui/icons-material/Launch';
 import SendIcon from '@mui/icons-material/Send';
 import BlockIcon from '@mui/icons-material/Block';
 import { useAgentStore, type ResearchAgentState } from '@/store/agentStore';
@@ -39,12 +38,6 @@ function formatApprovalUsd(value: unknown, fallback = 'Unknown'): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(amount);
-}
-
-function usageSourceLabel(source: unknown): string {
-  return source === 'hf_billing_current_session'
-    ? 'HF billing'
-    : 'app telemetry';
 }
 
 function numberOrNull(value: unknown): number | null {
@@ -168,46 +161,6 @@ function formatResearchStep(raw: string): { label: string } {
     const filename = path.split('/').pop() || path;
     return { label: filename ? `Reading ${filename}` : 'Reading file' };
   }
-  if (step.startsWith('explore_hf_docs')) {
-    const endpoint = (args.endpoint) || (args.query);
-    return { label: endpoint ? `Exploring docs: ${endpoint}` : 'Exploring docs' };
-  }
-  if (step.startsWith('fetch_hf_docs')) {
-    const url = (args.url) || '';
-    const page = url.split('/').pop()?.replace(/\.md$/, '');
-    return { label: page ? `Reading docs: ${page}` : 'Fetching docs' };
-  }
-  if (step.startsWith('hf_inspect_dataset')) {
-    const dataset = (args.dataset);
-    return { label: dataset ? `Inspecting dataset: ${dataset}` : 'Inspecting dataset' };
-  }
-  if (step.startsWith('hf_papers')) {
-    const op = args.operation as string;
-    const detail = (args.query) || (args.arxiv_id);
-    const opLabels: Record<string, string> = {
-      trending: 'Browsing trending papers',
-      search: 'Searching papers',
-      paper_details: 'Reading paper details',
-      read_paper: 'Reading paper',
-      citation_graph: 'Tracing citations',
-      snippet_search: 'Searching paper snippets',
-      recommend: 'Finding related papers',
-      find_datasets: 'Finding paper datasets',
-      find_models: 'Finding paper models',
-      find_collections: 'Finding paper collections',
-      find_all_resources: 'Finding paper resources',
-    };
-    const base = (op && opLabels[op]) || 'Searching papers';
-    return { label: detail ? `${base}: ${detail}` : base };
-  }
-  if (step.startsWith('find_hf_api')) {
-    const detail = (args.query) || (args.tag);
-    return { label: detail ? `Finding API: ${detail}` : 'Finding API endpoints' };
-  }
-  if (step.startsWith('hf_repo_files')) {
-    const repo = (args.repo_id) || (args.repo);
-    return { label: repo ? `Reading ${repo} files` : 'Reading repo files' };
-  }
   if (step.startsWith('read')) {
     const path = (args.path) || '';
     const filename = path.split('/').pop();
@@ -264,195 +217,7 @@ function ResearchSteps({ steps }: { steps: string[] }) {
 }
 
 // ---------------------------------------------------------------------------
-// Trackio dashboard embed
-// ---------------------------------------------------------------------------
-
-// HF repo IDs are `<owner>/<name>` where each segment is alphanumerics plus
-// `_`, `.`, `-`. Anything else (slashes, spaces, query params, missing owner)
-// would let an attacker-controlled string redirect the embed to a different
-// Space, so we refuse to render rather than build a malformed URL.
-const SPACE_ID_PATTERN = /^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/;
-
-function isValidSpaceId(spaceId: string): boolean {
-  return SPACE_ID_PATTERN.test(spaceId);
-}
-
-/** HF Space embed subdomain: 'user/space_name' → 'user-space-name'. */
-function spaceIdToSubdomain(spaceId: string): string {
-  return spaceId
-    .toLowerCase()
-    .replace(/[/_.]/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '');
-}
-
-function buildTrackioEmbedUrl(spaceId: string, project?: string): string {
-  // __theme=dark is gradio's standard query param to force the embedded
-  // dashboard into dark mode so it blends with the surrounding chat instead
-  // of flashing a bright white panel inside the dark UI.
-  const params = new URLSearchParams({
-    sidebar: 'hidden',
-    footer: 'false',
-    __theme: 'dark',
-  });
-  if (project) params.set('project', project);
-  return `https://${spaceIdToSubdomain(spaceId)}.hf.space/?${params.toString()}`;
-}
-
-function buildTrackioPageUrl(spaceId: string, project?: string): string {
-  const qs = project ? `?${new URLSearchParams({ project }).toString()}` : '';
-  return `https://platformops.co/spaces/${spaceId}${qs}`;
-}
-
-function TrackioEmbed({ spaceId, project }: { spaceId: string; project?: string }) {
-  const [expanded, setExpanded] = useState(true);
-  const [iframeLoaded, setIframeLoaded] = useState(false);
-  const embedUrl = useMemo(() => buildTrackioEmbedUrl(spaceId, project), [spaceId, project]);
-  const pageUrl = useMemo(() => buildTrackioPageUrl(spaceId, project), [spaceId, project]);
-  const label = project ? `${spaceId} · ${project}` : spaceId;
-
-  if (!isValidSpaceId(spaceId)) return null;
-
-  return (
-    <Box sx={{ pl: 4.5, pr: 1.5, pb: 1, pt: 0.25 }}>
-      <Box
-        sx={{
-          border: '1px solid var(--tool-border)',
-          borderRadius: '8px',
-          overflow: 'hidden',
-          bgcolor: 'var(--code-panel-bg)',
-        }}
-      >
-        <Stack
-          direction="row"
-          alignItems="center"
-          spacing={1}
-          onClick={(e) => e.stopPropagation()}
-          sx={{
-            px: 1.25,
-            py: 0.5,
-            borderBottom: expanded ? '1px solid var(--tool-border)' : 'none',
-          }}
-        >
-          <Typography
-            sx={{
-              fontFamily: '"JetBrains Mono", ui-monospace, SFMono-Regular, monospace',
-              fontSize: '0.65rem',
-              fontWeight: 600,
-              color: 'var(--accent-yellow)',
-              letterSpacing: '0.04em',
-            }}
-          >
-            trackio
-          </Typography>
-          <Typography
-            sx={{
-              fontFamily: '"JetBrains Mono", ui-monospace, SFMono-Regular, monospace',
-              fontSize: '0.65rem',
-              color: 'var(--muted-text)',
-              flex: 1,
-              minWidth: 0,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {label}
-          </Typography>
-          <Link
-            href={pageUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={(e) => e.stopPropagation()}
-            sx={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 0.4,
-              color: 'var(--accent-yellow)',
-              fontSize: '0.65rem',
-              textDecoration: 'none',
-              '&:hover': { textDecoration: 'underline' },
-            }}
-          >
-            <LaunchIcon sx={{ fontSize: 11 }} />
-            Open
-          </Link>
-          <Button
-            size="small"
-            onClick={(e) => {
-              e.stopPropagation();
-              setExpanded((v) => !v);
-            }}
-            sx={{
-              textTransform: 'none',
-              minWidth: 'auto',
-              px: 0.75,
-              py: 0,
-              fontSize: '0.65rem',
-              color: 'var(--muted-text)',
-              '&:hover': { color: 'var(--text)', bgcolor: 'transparent' },
-            }}
-          >
-            {expanded ? 'Hide' : 'Show'}
-          </Button>
-        </Stack>
-        {expanded && (
-          <Box sx={{ position: 'relative', width: '100%', height: 480, bgcolor: 'var(--code-panel-bg)' }}>
-            <iframe
-              src={embedUrl}
-              title={`Trackio dashboard ${label}`}
-              loading="lazy"
-              onLoad={() => setIframeLoaded(true)}
-              sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads allow-modals"
-              style={{ border: 0, width: '100%', height: '100%', display: 'block' }}
-            />
-            {!iframeLoaded && (
-              <Stack
-                direction="column"
-                alignItems="center"
-                justifyContent="center"
-                spacing={1.5}
-                sx={{
-                  position: 'absolute',
-                  inset: 0,
-                  bgcolor: 'var(--code-panel-bg)',
-                  color: 'var(--muted-text)',
-                  pointerEvents: 'none',
-                }}
-              >
-                <CircularProgress size={20} sx={{ color: 'var(--accent-yellow)' }} />
-                <Typography
-                  sx={{
-                    fontFamily: '"JetBrains Mono", ui-monospace, SFMono-Regular, monospace',
-                    fontSize: '0.75rem',
-                    color: 'var(--text)',
-                  }}
-                >
-                  Spinning up the trackio dashboard…
-                </Typography>
-                <Typography
-                  sx={{
-                    fontFamily: '"JetBrains Mono", ui-monospace, SFMono-Regular, monospace',
-                    fontSize: '0.65rem',
-                    color: 'var(--muted-text)',
-                    textAlign: 'center',
-                    maxWidth: 360,
-                    px: 2,
-                  }}
-                >
-                  First load takes 30–60 seconds. Charts appear automatically once the run starts logging.
-                </Typography>
-              </Stack>
-            )}
-          </Box>
-        )}
-      </Box>
-    </Box>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Hardware pricing ($/hr) — from HF Spaces & Jobs pricing
+// Hardware pricing ($/hr)
 // ---------------------------------------------------------------------------
 const HARDWARE_PRICING: Record<string, string> = {
   'cpu-basic': 'free',
@@ -589,16 +354,7 @@ function InlineApproval({
   }, [yoloCapArgs]);
 
   const handleScriptClick = useCallback(() => {
-    if (toolName === 'hf_jobs' && args?.script) {
-      const scriptContent = getEditedScript(toolCallId) || String(args.script);
-      setPanel(
-        { title: scriptLabel, script: { content: scriptContent, language: 'python' }, parameters: { tool_call_id: toolCallId } },
-        'script',
-        true,
-      );
-      setRightPanelOpen(true);
-      setLeftSidebarOpen(false);
-    }
+    // script click handler removed
   }, [toolCallId, toolName, args, scriptLabel, setPanel, getEditedScript, setRightPanelOpen, setLeftSidebarOpen]);
 
   const handleExtendYoloCap = useCallback(async () => {
@@ -680,7 +436,7 @@ function InlineApproval({
             Source
           </Typography>
           <Typography variant="body2" sx={{ color: 'var(--text)', fontSize: '0.72rem' }}>
-            {usageSourceLabel(args?.billing_source)}
+            {'app telemetry'}
           </Typography>
         </Box>
         <Box sx={{ display: 'flex', gap: 1 }}>
@@ -918,79 +674,6 @@ function InlineApproval({
         );
       })()}
 
-      {toolName === 'hf_jobs' && args && (() => {
-        const hw = String(args.hardware_flavor || 'cpu-basic');
-        const cost = costLabel(hw);
-        return (
-        <Box sx={{ mb: 1.5 }}>
-          <Typography variant="body2" sx={{ color: 'var(--muted-text)', fontSize: '0.75rem', mb: 1 }}>
-            Execute <Box component="span" sx={{ color: 'var(--accent-yellow)', fontWeight: 500 }}>{scriptLabel.replace('Script', 'Job')}</Box> on{' '}
-            <Box component="span" sx={{ fontWeight: 500, color: 'var(--text)' }}>
-              {hw}
-            </Box>
-            {cost && (
-              <Box component="span" sx={{ color: cost === 'free' ? 'var(--accent-green)' : 'var(--accent-yellow)', fontWeight: 500 }}>
-                {' '}({cost})
-              </Box>
-            )}
-            {!!args.timeout && (
-              <> for up to <Box component="span" sx={{ fontWeight: 500, color: 'var(--text)' }}>
-                {String(args.timeout)}
-              </Box></>
-            )}
-          </Typography>
-          {typeof args.script === 'string' && args.script && (
-            <Box
-              onClick={handleScriptClick}
-              sx={{
-                mt: 0.5,
-                p: 1.5,
-                bgcolor: 'var(--code-panel-bg)',
-                border: '1px solid var(--tool-border)',
-                borderRadius: '8px',
-                cursor: 'pointer',
-                transition: 'border-color 0.15s ease',
-                '&:hover': { borderColor: 'var(--accent-yellow)' },
-              }}
-            >
-              <Box
-                component="pre"
-                sx={{
-                  m: 0,
-                  fontFamily: '"JetBrains Mono", ui-monospace, SFMono-Regular, monospace',
-                  fontSize: '0.7rem',
-                  lineHeight: 1.5,
-                  color: 'var(--text)',
-                  overflow: 'hidden',
-                  display: '-webkit-box',
-                  WebkitLineClamp: 3,
-                  WebkitBoxOrient: 'vertical',
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-all',
-                }}
-              >
-                {String(args.script).trim()}
-              </Box>
-              <Typography
-                variant="caption"
-                sx={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 0.5,
-                  mt: 1,
-                  fontSize: '0.65rem',
-                  color: 'var(--muted-text)',
-                  '&:hover': { color: 'var(--accent-yellow)' },
-                }}
-              >
-                Click to view & edit
-              </Typography>
-            </Box>
-          )}
-        </Box>
-        );
-      })()}
-
       <Box sx={{ display: 'flex', gap: 1, mb: 1 }}>
         <TextField
           fullWidth
@@ -1081,7 +764,7 @@ function InlineApproval({
 const EMPTY_AGENTS: Record<string, ResearchAgentState> = {};
 
 export default function ToolCallGroup({ tools, approveTools }: ToolCallGroupProps) {
-  const { setPanel, lockPanel, getJobUrl, getEditedScript, setJobStatus, getJobStatus, getTrackioDashboard, setToolError, getToolError, setToolRejected, getToolRejected } = useAgentStore();
+  const { setPanel, lockPanel, getEditedScript, setToolError, getToolError, setToolRejected, getToolRejected } = useAgentStore();
   const researchAgents = useAgentStore(s => {
     const activeId = s.activeSessionId;
     return (activeId && s.sessionStates[activeId]?.researchAgents) || EMPTY_AGENTS;
@@ -1166,20 +849,7 @@ export default function ToolCallGroup({ tools, approveTools }: ToolCallGroupProp
   }, [tools, setToolError, getToolError]);
 
   const { scriptLabelMap, toolDisplayMap } = useMemo(() => {
-    const hfJobs = tools.filter(t => t.toolName === 'hf_jobs' && (t.input as Record<string, unknown>)?.script);
-    const scriptMap: Record<string, string> = {};
     const displayMap: Record<string, string> = {};
-    for (let i = 0; i < hfJobs.length; i++) {
-      const id = hfJobs[i].toolCallId;
-      if (hfJobs.length > 1) {
-        scriptMap[id] = `Script ${i + 1}`;
-        displayMap[id] = `hf_jobs #${i + 1}`;
-      } else {
-        scriptMap[id] = 'Script';
-        displayMap[id] = 'hf_jobs';
-      }
-    }
-    // Pretty name for research tool
     for (const t of tools) {
       if (t.toolName === 'research') {
         displayMap[t.toolCallId] = 'research';
@@ -1187,7 +857,7 @@ export default function ToolCallGroup({ tools, approveTools }: ToolCallGroupProp
         displayMap[t.toolCallId] = 'Usage warning';
       }
     }
-    return { scriptLabelMap: scriptMap, toolDisplayMap: displayMap };
+    return { scriptLabelMap: {} as Record<string, string>, toolDisplayMap: displayMap };
   }, [tools]);
 
   // ── Send all decisions as a single batch ──────────────────────────
@@ -1264,24 +934,6 @@ export default function ToolCallGroup({ tools, approveTools }: ToolCallGroupProp
     (tool: DynamicToolPart) => {
       const args = tool.input as Record<string, unknown> | undefined;
       const displayName = toolDisplayMap[tool.toolCallId] || tool.toolName;
-
-      if (tool.toolName === 'hf_jobs' && args?.script) {
-        const jobOutput = tool.output ?? (tool.state === 'output-error' ? (tool as Record<string, unknown>).errorText : undefined);
-        const hasOutput = (tool.state === 'output-available' || tool.state === 'output-error') && jobOutput;
-        const scriptContent = getEditedScript(tool.toolCallId) || String(args.script);
-        setPanel(
-          {
-            title: displayName,
-            script: { content: scriptContent, language: 'python' },
-            ...(hasOutput ? { output: { content: String(jobOutput), language: 'markdown' } } : {}),
-            parameters: { tool_call_id: tool.toolCallId },
-          },
-          hasOutput ? 'output' : 'script',
-        );
-        setRightPanelOpen(true);
-        setLeftSidebarOpen(false);
-        return;
-      }
 
       const inputSection = args ? { content: JSON.stringify(args, null, 2), language: 'json' } : undefined;
 
@@ -1369,17 +1021,6 @@ export default function ToolCallGroup({ tools, approveTools }: ToolCallGroupProp
       }
     }
   }, [tools, lockedToolId, showToolPanel]);
-
-  // ── Parse hf_jobs metadata from output ────────────────────────────
-  function parseJobMeta(output: unknown): { jobUrl?: string; jobStatus?: string } {
-    if (typeof output !== 'string') return {};
-    const urlMatch = output.match(/\*\*View at:\*\*\s*(https:\/\/[^\s\n]+)/);
-    const statusMatch = output.match(/\*\*Final Status:\*\*\s*([^\n]+)/);
-    return {
-      jobUrl: urlMatch?.[1],
-      jobStatus: statusMatch?.[1]?.trim(),
-    };
-  }
 
   // ── Render ────────────────────────────────────────────────────────
   const decidedCount = pendingTools.filter(t => decisions[t.toolCallId]).length;
@@ -1478,26 +1119,6 @@ export default function ToolCallGroup({ tools, approveTools }: ToolCallGroupProp
             : hasError ? 'error'
             : statusLabel(displayState as ToolPartState);
 
-          // Parse job metadata from hf_jobs output and store
-          const jobUrlFromStore = tool.toolName === 'hf_jobs' ? getJobUrl(tool.toolCallId) : undefined;
-          const jobStatusFromStore = tool.toolName === 'hf_jobs' ? getJobStatus(tool.toolCallId) : undefined;
-
-          const jobMetaFromOutput = tool.toolName === 'hf_jobs' && (tool.output || (tool as Record<string, unknown>).errorText)
-            ? parseJobMeta(tool.output ?? (tool as Record<string, unknown>).errorText)
-            : {};
-
-          // Store job status if we just parsed it and don't have it stored yet
-          if (tool.toolName === 'hf_jobs' && jobMetaFromOutput.jobStatus && !jobStatusFromStore) {
-            setJobStatus(tool.toolCallId, jobMetaFromOutput.jobStatus);
-          }
-
-          // Combine job URL and status from store (persisted) with output metadata (freshly parsed)
-          // Prefer stored values to ensure they persist across renders
-          const jobMeta = {
-            jobUrl: jobUrlFromStore || jobMetaFromOutput.jobUrl,
-            jobStatus: jobStatusFromStore || jobMetaFromOutput.jobStatus,
-          };
-
           return (
             <Box key={tool.toolCallId}>
               {/* Main tool row */}
@@ -1522,9 +1143,7 @@ export default function ToolCallGroup({ tools, approveTools }: ToolCallGroupProp
                   state={
                     hasError
                       ? 'output-error'
-                      : ((tool.toolName === 'hf_jobs' && jobMeta.jobStatus && ['ERROR', 'FAILED', 'CANCELLED'].includes(jobMeta.jobStatus))
-                        ? 'output-error'
-                        : displayState as ToolPartState)
+                      : displayState as ToolPartState
                   }
                 />
 
@@ -1545,9 +1164,8 @@ export default function ToolCallGroup({ tools, approveTools }: ToolCallGroupProp
                   {toolDisplayMap[tool.toolCallId] || tool.toolName}
                 </Typography>
 
-                {/* Status chip (non hf_jobs, or hf_jobs without final status) */}
+                {/* Status chip */}
                 {(() => {
-                  // Research tool: override chip label with this card's agent stats
                   const agentState: ResearchAgentState | undefined = tool.toolName === 'research'
                     ? researchAgents[tool.toolCallId]
                     : undefined;
@@ -1559,7 +1177,7 @@ export default function ToolCallGroup({ tools, approveTools }: ToolCallGroupProp
                         : researchChipLabel(agentState.stats, liveElapsed))
                     : null;
                   const chipLabel = researchLabel || label;
-                  if (!chipLabel || (tool.toolName === 'hf_jobs' && jobMeta.jobStatus)) return null;
+                  if (!chipLabel) return null;
 
                   return (
                     <Chip
@@ -1582,53 +1200,6 @@ export default function ToolCallGroup({ tools, approveTools }: ToolCallGroupProp
                   );
                 })()}
 
-                {/* HF Jobs: final status chip from job metadata */}
-                {tool.toolName === 'hf_jobs' && jobMeta.jobStatus && (
-                  <Chip
-                    label={jobMeta.jobStatus}
-                    size="small"
-                    sx={{
-                      height: 20,
-                      fontSize: '0.65rem',
-                      fontWeight: 600,
-                      bgcolor: jobMeta.jobStatus === 'COMPLETED'
-                        ? 'rgba(47,204,113,0.12)'
-                        : ['ERROR', 'FAILED', 'CANCELLED'].includes(jobMeta.jobStatus!)
-                          ? 'rgba(224,90,79,0.12)'
-                          : 'rgba(255,193,59,0.12)',
-                      color: jobMeta.jobStatus === 'COMPLETED'
-                        ? 'var(--accent-green)'
-                        : ['ERROR', 'FAILED', 'CANCELLED'].includes(jobMeta.jobStatus!)
-                          ? 'var(--accent-red)'
-                          : 'var(--accent-yellow)',
-                      letterSpacing: '0.03em',
-                    }}
-                  />
-                )}
-
-                {/* View on HF link — single place, shown whenever URL is available */}
-                {tool.toolName === 'hf_jobs' && jobMeta.jobUrl && (
-                  <Link
-                    href={jobMeta.jobUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    onClick={(e) => e.stopPropagation()}
-                    sx={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 0.5,
-                      color: 'var(--accent-yellow)',
-                      fontSize: '0.68rem',
-                      textDecoration: 'none',
-                      ml: 0.5,
-                      '&:hover': { textDecoration: 'underline' },
-                    }}
-                  >
-                    <LaunchIcon sx={{ fontSize: 12 }} />
-                    View on HF
-                  </Link>
-                )}
-
                 {clickable && !isPending && (
                   <OpenInNewIcon sx={{ fontSize: 14, color: 'var(--muted-text)', opacity: 0.6 }} />
                 )}
@@ -1638,18 +1209,6 @@ export default function ToolCallGroup({ tools, approveTools }: ToolCallGroupProp
               {tool.toolName === 'research' && !cancelled && state !== 'output-available' && state !== 'output-error' && state !== 'output-denied' && researchAgents[tool.toolCallId] && (
                 <ResearchSteps steps={researchAgents[tool.toolCallId].steps} />
               )}
-
-              {/* Trackio dashboard embed — shown for hf_jobs / sandbox_create runs that declared a trackio space */}
-              {(tool.toolName === 'hf_jobs' || tool.toolName === 'sandbox_create')
-                && !isPending
-                && !isRejected
-                && !cancelled
-                && (() => {
-                  const trackio = getTrackioDashboard(tool.toolCallId);
-                  return trackio
-                    ? <TrackioEmbed spaceId={trackio.spaceId} project={trackio.project} />
-                    : null;
-                })()}
 
               {/* Per-tool approval: undecided */}
               {isPending && !localDecision && !isSubmitting && (

@@ -51,17 +51,6 @@ def test_model_switcher_accepts_router_model_ids():
     assert model_switcher.is_valid_model_id("moonshotai/Kimi-K2.7-Code")
 
 
-def test_local_models_skip_hf_router_catalog_output():
-    class NoPrintConsole:
-        def print(self, *args, **kwargs):
-            raise AssertionError("local models should not print HF catalog info")
-
-    assert model_switcher._print_hf_routing_info(
-        "ollama/llama3.1:8b",
-        NoPrintConsole(),
-    )
-
-
 @pytest.mark.asyncio
 async def test_probe_and_switch_local_model_uses_no_effort(monkeypatch):
     calls = []
@@ -94,7 +83,6 @@ async def test_probe_and_switch_local_model_uses_no_effort(monkeypatch):
         Config(),
         session,
         Console(),
-        hf_token=None,
     )
 
     assert session.model_id == "ollama/llama3.1:8b"
@@ -134,7 +122,6 @@ async def test_probe_and_switch_local_model_rejects_probe_errors(monkeypatch):
         config,
         session,
         Console(),
-        hf_token=None,
     )
 
     assert config.model_name == "anthropic/claude-opus-4.8:fal-ai"

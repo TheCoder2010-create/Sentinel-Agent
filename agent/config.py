@@ -26,19 +26,10 @@ class Config(BaseModel):
     model_name: str
     mcpServers: dict[str, MCPServerConfig] = {}
     save_sessions: bool = True
-    session_dataset_repo: str = "smolagents/sentinel-ai-sessions"
-    # Per-user private dataset that mirrors each session in Claude Code JSONL
-    # format so the HF Agent Trace Viewer auto-renders it
-    # (https://platformops.co/changelog/agent-trace-viewer). Created private
-    # on first use; user flips it public via /share-traces. ``{hf_user}`` is
-    # substituted at upload time from the authenticated HF username.
-    share_traces: bool = True
-    personal_trace_repo_template: str = "{hf_user}/sentinel-ai-sessions"
+    session_dataset_repo: str = ""
     auto_save_interval: int = 1  # Save every N user turns (0 = disabled)
     # Mid-turn heartbeat: save + upload every N seconds while events are being
-    # emitted. Guards against losing trace data on long-running turns that
-    # crash before turn_complete (e.g. a multi-hour hf_jobs wait that OOMs).
-    # 0 = disabled. Consumed by agent.core.telemetry.HeartbeatSaver.
+    # emitted. 0 = disabled. Consumed by agent.core.telemetry.HeartbeatSaver.
     heartbeat_interval_s: int = 60
     yolo_mode: bool = False  # Auto-approve all tool calls without confirmation
     max_iterations: int = 300  # Max LLM calls per agent turn (-1 = unlimited)
@@ -51,9 +42,7 @@ class Config(BaseModel):
     # Reasoning effort *preference* — the ceiling the user wants. The probe
     # on `/model` walks a cascade down from here (``max`` → ``xhigh`` → ``high``
     # → …) and caches per-model what the provider actually accepted in
-    # ``Session.model_effective_effort``. Default ``high`` because HF Router
-    # accepts low/medium/high generically and provider-specific higher levels
-    # should be discovered through explicit probes. ``None`` = thinking off.
+    # ``Session.model_effective_effort``. ``None`` = thinking off.
     # Valid values: None | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
     reasoning_effort: str | None = "high"
     messaging: MessagingConfig = MessagingConfig()

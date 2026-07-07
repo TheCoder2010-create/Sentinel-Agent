@@ -14,9 +14,7 @@ from typing import Any
 import httpx
 from fastapi import HTTPException, Request, status
 
-from agent.core.hf_tokens import bearer_token_from_header, clean_hf_token
-
-from agent.core.hf_access import fetch_whoami_v2, normalize_hf_user_plan
+from agent.core.hf_tokens import bearer_token_from_header
 
 logger = logging.getLogger(__name__)
 
@@ -34,8 +32,7 @@ DEV_USER: dict[str, Any] = {
     "plan": "pro",
 }
 
-INTERNAL_HF_TOKEN_KEY = "_hf_token"
-OAUTH_SCOPE_COOKIE = "hf_oauth_scope_hash"
+OAUTH_SCOPE_COOKIE = "oauth_scope_hash"
 REQUIRED_OAUTH_SCOPES: tuple[str, ...] = (
     "openid",
     "profile",
@@ -69,12 +66,7 @@ def normalize_oauth_scopes(scopes: Iterable[str]) -> tuple[str, ...]:
 
 
 def configured_oauth_scopes() -> tuple[str, ...]:
-    """Return the scopes this backend should request from HF OAuth.
-
-    Spaces expose README ``hf_oauth_scopes`` through ``OAUTH_SCOPES``. Unioning
-    that value with the app-required scopes keeps the local request and Space
-    metadata in sync while ensuring new required scopes are never omitted.
-    """
+    """Return the scopes this backend should request from OAuth."""
     env_scopes = os.environ.get("OAUTH_SCOPES", "").split()
     return normalize_oauth_scopes((*env_scopes, *REQUIRED_OAUTH_SCOPES))
 
@@ -135,7 +127,9 @@ def _user_from_info(user_info: dict[str, Any]) -> dict[str, Any]:
 
 def _normalize_user_plan(whoami: Any) -> str:
     """Normalize a whoami-v2 payload to the app's supported plan tiers."""
-    return normalize_hf_user_plan(whoami) or "free"
+    if isinstance(whoami, dict):
+        return "pro" if whoami.get("isPro") else "free"
+    return "free"
 
 
 async def _fetch_user_plan(token: str) -> str:
@@ -170,41 +164,11 @@ async def _extract_user_from_token(token: str) -> dict[str, Any] | None:
         return None
     user = _user_from_info(user_info)
     user["plan"] = await _fetch_user_plan(token)
-    user[INTERNAL_HF_TOKEN_KEY] = clean_hf_token(token)
     return user
 
 
 async def _dev_user_from_env() -> dict[str, Any]:
-    """Use HF_TOKEN as the dev identity when available.
-
-    Local dev often runs without OAuth, but session trace uploads still need a
-    real HF namespace. Deriving the dev user from HF_TOKEN keeps local uploads
-    pointed at the token owner's dataset instead of dev/sentinel-ai-sessions.
-    """
-    token = clean_hf_token(os.environ.get("HF_TOKEN", ""))
-    if not token:
-        return dict(DEV_USER)
-
-    whoami = await fetch_whoami_v2(token)
-    if not isinstance(whoami, dict):
-        return dict(DEV_USER)
-
-    username = None
-    for key in ("name", "user", "preferred_username"):
-        value = whoami.get(key)
-        if isinstance(value, str) and value:
-            username = value
-            break
-    if not username:
-        return dict(DEV_USER)
-
-    return {
-        "user_id": username,
-        "username": username,
-        "authenticated": True,
-        "plan": await _fetch_user_plan(token),
-        INTERNAL_HF_TOKEN_KEY: token,
-    }
+    return dict(DEV_USER)
 
 
 async def get_current_user(request: Request) -> dict[str, Any]:
@@ -212,9 +176,9 @@ async def get_current_user(request: Request) -> dict[str, Any]:
 
     Checks (in order):
     1. Authorization: Bearer <token> header
-    2. hf_access_token cookie
+    2. access_token cookie
 
-    In dev mode (AUTH_ENABLED=False), uses HF_TOKEN as the user when possible.
+    In dev mode (AUTH_ENABLED=False), returns the dev user.
     """
     if not AUTH_ENABLED:
         return await _dev_user_from_env()
@@ -228,7 +192,7 @@ async def get_current_user(request: Request) -> dict[str, Any]:
             return user
 
     # Try cookie
-    token = request.cookies.get("hf_access_token")
+    token = request.cookies.get("access_token")
     if token:
         if not _cookie_has_current_oauth_scope_marker(request):
             logger.info(

@@ -19,25 +19,19 @@ from litellm.exceptions import ContextWindowExceededError
 
 from agent.config import Config
 from agent.core.approval_policy import (
-    is_scheduled_operation,
     normalize_tool_operation,
 )
 from agent.core.cost_estimation import CostEstimate, estimate_tool_cost
 from agent.messaging.gateway import NotificationGateway
 from agent.core import telemetry
 from agent.core.doom_loop import check_for_doom_loop
-from agent.core.hf_access import (
-    HF_BILLING_URL,
-    HF_PRO_SUBSCRIBE_URL,
-    is_inference_billing_error,
-)
 from agent.core.llm_params import _resolve_llm_params
 from agent.core.prompt_caching import (
     router_session_id_for,
     with_prompt_cache_params,
     with_prompt_caching,
 )
-from agent.core.session import DEFAULT_SESSION_LOG_DIR, Event, OpType, Session
+from agent.core.session import Event, OpType, Session
 from agent.core.tools import ToolRouter
 from agent.core.usage_thresholds import (
     USAGE_THRESHOLD_TOOL_NAME,
@@ -54,12 +48,15 @@ from agent.core.yolo_budget import (
     yolo_budget_can_resume,
     yolo_budget_pending_to_tool,
 )
-from agent.tools.jobs_tool import CPU_FLAVORS
-from agent.tools.sandbox_tool import (
-    DEFAULT_CPU_SANDBOX_HARDWARE,
-    start_cpu_sandbox_preload,
-    teardown_session_sandbox,
-)
+DEFAULT_CPU_SANDBOX_HARDWARE = "cpu-basic"
+
+
+def start_cpu_sandbox_preload(session) -> None:
+    pass
+
+
+async def teardown_session_sandbox(session) -> None:
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -222,9 +219,6 @@ def _validate_tool_args(tool_args: dict) -> tuple[bool, str | None]:
     return True, None
 
 
-_IMMEDIATE_HF_JOB_RUNS = {"run", "uv"}
-
-
 @dataclass(frozen=True)
 class ApprovalDecision:
     requires_approval: bool
@@ -240,18 +234,8 @@ def _operation(tool_args: dict) -> str:
     return normalize_tool_operation(tool_args.get("operation"))
 
 
-def _is_immediate_hf_job_run(tool_name: str, tool_args: dict) -> bool:
-    return tool_name == "hf_jobs" and _operation(tool_args) in _IMMEDIATE_HF_JOB_RUNS
-
-
-def _is_scheduled_hf_job_run(tool_name: str, tool_args: dict) -> bool:
-    return tool_name == "hf_jobs" and is_scheduled_operation(_operation(tool_args))
-
-
 def _is_budgeted_auto_approval_target(tool_name: str, tool_args: dict) -> bool:
-    return tool_name == "sandbox_create" or _is_immediate_hf_job_run(
-        tool_name, tool_args
-    )
+    return tool_name == "sandbox_create"
 
 
 def _base_needs_approval(
@@ -267,41 +251,6 @@ def _base_needs_approval(
     if tool_name == "sandbox_create":
         hardware = tool_args.get("hardware") or DEFAULT_CPU_SANDBOX_HARDWARE
         return hardware != DEFAULT_CPU_SANDBOX_HARDWARE
-
-    if tool_name == "hf_jobs":
-        operation = _operation(tool_args)
-        if is_scheduled_operation(operation):
-            return True
-        if operation not in _IMMEDIATE_HF_JOB_RUNS:
-            return False
-
-        # Check if this is a CPU-only job
-        # hardware_flavor is at top level of tool_args, not nested in args
-        hardware_flavor = (
-            tool_args.get("hardware_flavor")
-            or tool_args.get("flavor")
-            or tool_args.get("hardware")
-            or "cpu-basic"
-        )
-        is_cpu_job = hardware_flavor in CPU_FLAVORS
-
-        if is_cpu_job:
-            if config and not config.confirm_cpu_jobs:
-                return False
-            return True
-
-        return True
-
-    # Check for file upload operations (hf_private_repos or other tools)
-    if tool_name == "hf_private_repos":
-        operation = tool_args.get("operation", "")
-        if operation == "upload_file":
-            if config and config.auto_file_upload:
-                return False
-            return True
-        # Other operations (create_repo, etc.) always require approval
-        if operation in ["create_repo"]:
-            return True
 
     return False
 
@@ -326,18 +275,6 @@ async def _approval_decision(
     """Return the approval decision for one parsed tool call."""
     config = session.config
     base_requires_approval = _base_needs_approval(tool_name, tool_args, config)
-
-    # Scheduled jobs are recurring/unbounded enough that YOLO never bypasses
-    # the human confirmation, including legacy config.yolo_mode.
-    if _is_scheduled_hf_job_run(tool_name, tool_args):
-        reason = "Scheduled HF jobs always require manual approval."
-        if _session_auto_approval_enabled(session):
-            reason = "Scheduled HF jobs require disabling YOLO because their recurring cost is unbounded."
-        return ApprovalDecision(
-            requires_approval=True,
-            auto_approval_blocked=_effective_yolo_enabled(session, config),
-            block_reason=reason,
-        )
 
     yolo_enabled = _effective_yolo_enabled(session, config)
     budgeted_target = _is_budgeted_auto_approval_target(tool_name, tool_args)
@@ -410,15 +347,6 @@ async def _record_manual_approved_spend_if_needed(
 ) -> BudgetDecision:
     if not _session_auto_approval_enabled(session):
         return BudgetDecision(allowed=True)
-    if _is_scheduled_hf_job_run(tool_name, tool_args):
-        return BudgetDecision(
-            allowed=False,
-            billable=True,
-            block_reason=(
-                "Scheduled HF jobs require disabling YOLO because their recurring "
-                "cost is unbounded."
-            ),
-        )
     if not _is_budgeted_auto_approval_target(tool_name, tool_args):
         return BudgetDecision(allowed=True)
     estimate = await estimate_tool_cost(tool_name, tool_args, session=session)
@@ -439,15 +367,6 @@ async def _check_manual_approved_budget(
 ) -> BudgetDecision:
     if not _session_auto_approval_enabled(session):
         return BudgetDecision(allowed=True)
-    if _is_scheduled_hf_job_run(tool_name, tool_args):
-        return BudgetDecision(
-            allowed=False,
-            billable=True,
-            block_reason=(
-                "Scheduled HF jobs require disabling YOLO because their recurring "
-                "cost is unbounded."
-            ),
-        )
     if not _is_budgeted_auto_approval_target(tool_name, tool_args):
         return BudgetDecision(allowed=True)
     estimate = await estimate_tool_cost(tool_name, tool_args, session=session)
@@ -554,15 +473,6 @@ async def _heal_effort_and_rebuild_params(
     error: Exception,
     llm_params: dict,
 ) -> dict:
-    """Update the session's effort cache based on ``error`` and return new
-    llm_params. Called only when ``_is_effort_config_error(error)`` is True.
-
-    Two branches:
-      • thinking-unsupported → cache ``None`` for this model, next call
-        strips thinking entirely
-      • invalid-effort → re-run the full cascade probe; the result lands
-        in the cache
-    """
     from agent.core.effort_probe import (
         ProbeInconclusive,
         _is_thinking_unsupported,
@@ -588,8 +498,6 @@ async def _heal_effort_and_rebuild_params(
                 outcome.effective_effort,
             )
         except ProbeInconclusive:
-            # Transient during healing — strip thinking for safety, next
-            # call will either succeed or surface the real error.
             session.model_effective_effort[model] = None
             logger.info("healed: %s probe inconclusive — stripped", model)
 
@@ -597,28 +505,6 @@ async def _heal_effort_and_rebuild_params(
         model,
         session.hf_token,
         reasoning_effort=session.effective_effort_for(model),
-    )
-
-
-def _inference_credit_error_message(user_plan: str | None = None) -> str:
-    plan = (user_plan or "unknown").lower()
-    if plan == "pro":
-        return (
-            "PlatformOps Inference Providers credits are exhausted for this "
-            "account.\n\n"
-            f"Add credits to continue: {HF_BILLING_URL}"
-        )
-    if plan == "free":
-        return (
-            "Your monthly PlatformOps Inference Providers credits are exhausted.\n\n"
-            f"Subscribe to HF PRO for more monthly usage: {HF_PRO_SUBSCRIBE_URL}\n"
-            f"Or add pay-as-you-go credits: {HF_BILLING_URL}"
-        )
-    return (
-        "PlatformOps Inference Providers credits appear to be exhausted for "
-        "this account.\n\n"
-        f"Add pay-as-you-go credits: {HF_BILLING_URL}\n"
-        f"If this is a free account, HF PRO adds more monthly usage: {HF_PRO_SUBSCRIBE_URL}"
     )
 
 
@@ -636,30 +522,18 @@ def _friendly_error_message(
         or "invalid x-api-key" in err_str
     ):
         return (
-            "Authentication failed - your PlatformOps token is missing or invalid.\n\n"
-            "To fix this, set HF_TOKEN=hf_... or run `hf auth login`.\n\n"
+            "Authentication failed - your token is missing or invalid.\n\n"
+            "To fix this, set the appropriate token or login.\n\n"
             "You can also add it to a .env file in the project root.\n"
             "To switch models, use the /model command."
-        )
-
-    if is_inference_billing_error(error):
-        return _inference_credit_error_message(user_plan)
-
-    if "not supported by provider" in err_str or "no provider supports" in err_str:
-        return (
-            "The model isn't served by the provider you pinned.\n\n"
-            "Drop the ':<provider>' suffix to let the HF router auto-pick a "
-            "provider, or use '/model' (no arg) to see which providers host "
-            "which models."
         )
 
     if "model_not_found" in err_str or (
         "model" in err_str and ("not found" in err_str or "does not exist" in err_str)
     ):
         return (
-            "Model not found. Use '/model' to list suggestions, or paste an "
-            "HF model id like 'MiniMaxAI/MiniMax-M3:novita'. Availability is shown "
-            "when you switch."
+            "Model not found. Use '/model' to list suggestions. "
+            "Availability is shown when you switch."
         )
 
     return None
@@ -739,8 +613,7 @@ async def _compact_and_notify(session: Session) -> None:
 
 
 async def _cleanup_on_cancel(session: Session) -> None:
-    """Kill sandbox processes and cancel HF jobs when the user interrupts."""
-    # Kill active sandbox processes
+    """Kill sandbox processes when the user interrupts."""
     sandbox = getattr(session, "sandbox", None)
     if sandbox:
         try:
@@ -748,20 +621,6 @@ async def _cleanup_on_cancel(session: Session) -> None:
             logger.info("Killed sandbox processes on cancel")
         except Exception as e:
             logger.warning("Failed to kill sandbox processes: %s", e)
-
-    # Cancel running HF jobs
-    job_ids = list(session._running_job_ids)
-    if job_ids:
-        from huggingface_hub import HfApi
-
-        api = HfApi(token=session.hf_token)
-        for job_id in job_ids:
-            try:
-                await asyncio.to_thread(api.cancel_job, job_id=job_id)
-                logger.info("Cancelled HF job %s on interrupt", job_id)
-            except Exception as e:
-                logger.warning("Failed to cancel HF job %s: %s", job_id, e)
-        session._running_job_ids.clear()
 
 
 @dataclass
@@ -1811,20 +1670,6 @@ class Handlers:
                     tools_data = []
                     blocked_payloads = []
                     for tc, tool_name, tool_args, decision in approval_required_tools:
-                        # Resolve sandbox file paths for hf_jobs scripts so the
-                        # frontend can display & edit the actual file content.
-                        if tool_name == "hf_jobs" and isinstance(
-                            tool_args.get("script"), str
-                        ):
-                            from agent.tools.sandbox_tool import resolve_sandbox_script
-
-                            sandbox = getattr(session, "sandbox", None)
-                            resolved, _ = await resolve_sandbox_script(
-                                sandbox, tool_args["script"]
-                            )
-                            if resolved:
-                                tool_args = {**tool_args, "script": resolved}
-
                         tool_payload = {
                             "tool": tool_name,
                             "arguments": tool_args,
@@ -1894,10 +1739,7 @@ class Handlers:
             except Exception as e:
                 import traceback
 
-                error_msg = _friendly_error_message(
-                    e,
-                    user_plan=getattr(session, "user_plan", None),
-                )
+                error_msg = _friendly_error_message(e)
                 if error_msg is None:
                     error_msg = str(e) + "\n" + traceback.format_exc()
 
@@ -2290,9 +2132,6 @@ class Handlers:
                     tool_args["script"] = edited_script
                     was_edited = True
                     logger.info(f"Using user-edited script for {tool_name} ({tc.id})")
-                selected_namespace = approval_decision.get("namespace")
-                if selected_namespace and tool_name == "hf_jobs":
-                    tool_args["namespace"] = selected_namespace
                 approved_tasks.append((tc, tool_name, tool_args, was_edited))
             else:
                 rejected_tasks.append((tc, tool_name, approval_decision))
@@ -2611,14 +2450,12 @@ async def submission_loop(
     session_holder: list | None = None,
     hf_token: str | None = None,
     user_id: str | None = None,
-    hf_username: str | None = None,
     local_mode: bool = False,
     autonomous_mode: bool = False,
     stream: bool = True,
     notification_gateway: NotificationGateway | None = None,
     notification_destinations: list[str] | None = None,
     defer_turn_complete_notification: bool = False,
-    user_plan: str | None = None,
 ) -> None:
     """
     Main agent loop - processes submissions and dispatches to handlers.
@@ -2632,8 +2469,6 @@ async def submission_loop(
         tool_router=tool_router,
         hf_token=hf_token,
         user_id=user_id,
-        hf_username=hf_username,
-        user_plan=user_plan,
         local_mode=local_mode,
         autonomous_mode=autonomous_mode,
         stream=stream,
@@ -2646,16 +2481,6 @@ async def submission_loop(
     if not local_mode:
         start_cpu_sandbox_preload(session)
     logger.info("Agent loop started")
-
-    # Retry any failed uploads from previous sessions (fire-and-forget).
-    # Includes the personal trace repo when enabled so a session that failed
-    # to publish to the user's HF dataset gets a fresh attempt on next run.
-    if config and config.save_sessions:
-        Session.retry_failed_uploads_detached(
-            directory=str(DEFAULT_SESSION_LOG_DIR),
-            repo_id=config.session_dataset_repo,
-            personal_repo_id=session._personal_trace_repo_id(),
-        )
 
     try:
         # Main processing loop

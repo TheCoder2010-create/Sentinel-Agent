@@ -57,10 +57,8 @@ class FakeSession:
     def __init__(
         self,
         *,
-        hf_token: str | None = "token",
         user_plan: str | None = None,
     ) -> None:
-        self.hf_token = hf_token
         self.user_plan = user_plan
         self.context_manager = SimpleNamespace(items=[])
         self.pending_approval: Any = None
@@ -112,7 +110,6 @@ def _make_agent_session(
         tool_router=FakeToolRouter(),  # type: ignore[arg-type]
         submission_queue=asyncio.Queue(),
         user_id=user_id,
-        hf_token="token",
     )
     agent_session.is_processing = is_processing
     if last_active_at is not None:
@@ -147,7 +144,6 @@ def _install_fake_create(manager: SessionManager) -> asyncio.Event:
 
     def fake_create_session_sync(**kwargs: Any):
         return object(), FakeSession(
-            hf_token=kwargs.get("hf_token"),
             user_plan=kwargs.get("user_plan"),
         )
 

@@ -32,11 +32,9 @@ class FakeRuntimeSession:
     def __init__(
         self,
         *,
-        hf_token: str | None = None,
         user_plan: str | None = None,
         model: str = "test-model",
     ):
-        self.hf_token = hf_token
         self.user_plan = user_plan
         self.context_manager = SimpleNamespace(items=[])
         self.pending_approval = None
@@ -138,17 +136,15 @@ def _runtime_agent_session(
     session_id: str,
     *,
     user_id: str = "owner",
-    hf_token: str | None = "owner-token",
     user_plan: str | None = None,
 ) -> AgentSession:
-    runtime_session = FakeRuntimeSession(hf_token=hf_token, user_plan=user_plan)
+    runtime_session = FakeRuntimeSession(user_plan=user_plan)
     return AgentSession(
         session_id=session_id,
         session=runtime_session,  # type: ignore[arg-type]
         tool_router=object(),  # type: ignore[arg-type]
         submission_queue=asyncio.Queue(),
         user_id=user_id,
-        hf_token=hf_token,
         user_plan=user_plan,
     )
 
@@ -279,255 +275,6 @@ def test_usage_threshold_pending_approval_serializes_and_restores():
     assert restored.pending_approval == pending
 
 
-def test_usage_spend_prefers_hf_current_session_over_telemetry():
-    spend, source = SessionManager._usage_spend_from_response(
-        {
-            "hf_account": {
-                "current_session": {
-                    "total_usd": 7.5,
-                },
-            },
-            "session": {
-                "total_usd": 2.0,
-            },
-        }
-    )
-
-    assert spend == 7.5
-    assert source == "hf_billing_current_session"
-
-
-def test_usage_spend_combines_hf_inference_with_telemetry_estimates():
-    spend, source = SessionManager._usage_spend_from_response(
-        {
-            "hf_account": {
-                "current_session": {
-                    "inference_providers_usd": 7.5,
-                },
-            },
-            "session": {
-                "total_usd": 99.0,
-                "hf_jobs_estimated_usd": 1.25,
-                "sandbox_estimated_usd": 0.5,
-            },
-        }
-    )
-
-    assert spend == 9.25
-    assert source == "hf_billing_current_session"
-
-
-def test_usage_spend_falls_back_to_app_telemetry():
-    spend, source = SessionManager._usage_spend_from_response(
-        {
-            "hf_account": {
-                "current_session": None,
-            },
-            "session": {
-                "total_usd": 2.0,
-            },
-        }
-    )
-
-    assert spend == 2.0
-    assert source == "app_telemetry_session"
-
-
-def test_usage_spend_falls_back_when_hf_total_is_unavailable():
-    spend, source = SessionManager._usage_spend_from_response(
-        {
-            "hf_account": {
-                "current_session": {
-                    "total_usd": None,
-                },
-            },
-            "session": {
-                "total_usd": 3.5,
-            },
-        }
-    )
-
-    assert spend == 3.5
-    assert source == "app_telemetry_session"
-
-
-@pytest.mark.asyncio
-async def test_refresh_usage_metrics_uses_hf_billing_plus_sandbox(monkeypatch):
-    manager = _manager_with_store(NoopSessionStore())
-    agent_session = _runtime_agent_session("s1", hf_token="owner-token")
-    agent_session.session.logged_events = [
-        {
-            "timestamp": "2026-06-01T12:00:00+00:00",
-            "event_type": "llm_call",
-            "data": {"cost_usd": 0.5, "total_tokens": 42},
-        },
-        {
-            "timestamp": "2026-06-01T12:05:00+00:00",
-            "event_type": "hf_job_complete",
-            "data": {"estimated_cost_usd": 1.0},
-        },
-        {
-            "timestamp": "2026-06-01T12:10:00+00:00",
-            "event_type": "sandbox_create",
-            "data": {"sandbox_id": "owner/sandbox-1", "hardware": "t4-small"},
-        },
-        {
-            "timestamp": "2026-06-01T12:40:00+00:00",
-            "event_type": "sandbox_destroy",
-            "data": {"sandbox_id": "owner/sandbox-1", "lifetime_s": 1800},
-        },
-    ]
-
-    async def fake_billing_snapshot(_manager, *, hf_token, session_id, timezone_name):
-        assert hf_token == "owner-token"
-        assert session_id == "s1"
-        assert timezone_name == "UTC"
-        return {
-            "billing_scope": "account_window_delta",
-            "hf_billing": {
-                "source": "hf_billing_usage_v2",
-                "available": True,
-                "current_session": {
-                    "window_start": "2026-06-01T12:00:00Z",
-                    "window_end": "2026-06-01T12:40:00Z",
-                    "timezone": "UTC",
-                    "total_usd": 4.0,
-                    "inference_providers_usd": 3.0,
-                    "hf_jobs_usd": 1.0,
-                    "inference_provider_requests": 6,
-                    "hf_jobs_minutes": 2.0,
-                    "access_token": "must-not-persist",
-                },
-            },
-            "month": {"total_usd": 999},
-            "inference_providers_credits": {"limit_usd": 999},
-        }
-
-    monkeypatch.setattr("usage.build_hf_billing_snapshot", fake_billing_snapshot)
-
-    metrics = await manager.refresh_session_usage_metrics(agent_session)
-
-    assert metrics["total_usd"] == 4.3
-    assert metrics["total_usd_source"] == "hf_billing_plus_sandbox_estimate"
-    assert metrics["app_total_usd"] == 1.8
-    assert metrics["hf_billing_total_usd"] == 4.0
-    assert agent_session.session.usage_metrics == metrics
-    assert agent_session.session.usage_hf_billing_snapshot == {
-        "billing_scope": "account_window_delta",
-        "hf_billing": {
-            "source": "hf_billing_usage_v2",
-            "available": True,
-            "error": None,
-            "current_session": {
-                "window_start": "2026-06-01T12:00:00Z",
-                "window_end": "2026-06-01T12:40:00Z",
-                "timezone": "UTC",
-                "total_usd": 4.0,
-                "inference_providers_usd": 3.0,
-                "hf_jobs_usd": 1.0,
-                "inference_provider_requests": 6,
-                "hf_jobs_minutes": 2.0,
-            },
-        },
-    }
-
-
-@pytest.mark.asyncio
-async def test_refresh_usage_metrics_missing_token_falls_back_to_app_telemetry():
-    manager = _manager_with_store(NoopSessionStore())
-    agent_session = _runtime_agent_session("s1", hf_token=None)
-    agent_session.session.hf_token = None
-    agent_session.session.logged_events = [
-        {
-            "timestamp": "2026-06-01T12:00:00+00:00",
-            "event_type": "llm_call",
-            "data": {"cost_usd": 2.0, "total_tokens": 10},
-        }
-    ]
-
-    metrics = await manager.refresh_session_usage_metrics(agent_session)
-
-    assert metrics["total_usd"] == 2.0
-    assert metrics["total_usd_source"] == "app_telemetry_fallback"
-    assert metrics["hf_billing"] == {
-        "source": "hf_billing_usage_v2",
-        "available": False,
-        "error": "missing_hf_token",
-        "current_session": None,
-    }
-
-
-@pytest.mark.asyncio
-async def test_refresh_usage_metrics_failure_records_error_code(monkeypatch):
-    manager = _manager_with_store(NoopSessionStore())
-    agent_session = _runtime_agent_session("s1", hf_token="owner-token")
-    agent_session.session.logged_events = [
-        {
-            "timestamp": "2026-06-01T12:00:00+00:00",
-            "event_type": "llm_call",
-            "data": {"cost_usd": 2.0, "total_tokens": 10},
-        }
-    ]
-
-    async def fail_billing_snapshot(*_args, **_kwargs):
-        raise RuntimeError("boom")
-
-    monkeypatch.setattr("usage.build_hf_billing_snapshot", fail_billing_snapshot)
-
-    metrics = await manager.refresh_session_usage_metrics(
-        agent_session,
-        error_code="unit_billing_error",
-    )
-
-    assert metrics["total_usd"] == 2.0
-    assert metrics["total_usd_source"] == "app_telemetry_fallback"
-    assert metrics["hf_billing"] == {
-        "source": "hf_billing_usage_v2",
-        "available": False,
-        "error": "unit_billing_error",
-        "current_session": None,
-    }
-
-
-@pytest.mark.asyncio
-async def test_refresh_usage_metrics_timeout_records_error_code(monkeypatch):
-    manager = _manager_with_store(NoopSessionStore())
-    agent_session = _runtime_agent_session("s1", hf_token="owner-token")
-    agent_session.session.logged_events = [
-        {
-            "timestamp": "2026-06-01T12:00:00+00:00",
-            "event_type": "llm_call",
-            "data": {"cost_usd": 2.0, "total_tokens": 10},
-        }
-    ]
-
-    async def slow_billing_snapshot(*_args, **_kwargs):
-        await asyncio.sleep(0.05)
-        return {
-            "hf_billing": {
-                "available": True,
-                "current_session": {"total_usd": 999},
-            }
-        }
-
-    monkeypatch.setattr("usage.build_hf_billing_snapshot", slow_billing_snapshot)
-
-    metrics = await manager.refresh_session_usage_metrics(
-        agent_session,
-        error_code="unit_billing_timeout",
-        billing_timeout_s=0.001,
-    )
-
-    assert metrics["total_usd"] == 2.0
-    assert metrics["total_usd_source"] == "app_telemetry_fallback"
-    assert metrics["hf_billing"] == {
-        "source": "hf_billing_usage_v2",
-        "available": False,
-        "error": "unit_billing_timeout",
-        "current_session": None,
-    }
-
-
 @pytest.mark.asyncio
 async def test_usage_threshold_checker_creates_synthetic_pending_approval(monkeypatch):
     manager = _manager_with_store(NoopSessionStore())
@@ -577,7 +324,7 @@ async def test_usage_threshold_checker_skips_billing_when_local_spend_below_thre
     async def fake_current_session_usage_spend(_agent_session, **_kwargs):
         nonlocal calls
         calls += 1
-        return 12.25, "hf_billing_current_session"
+        return 12.25, "app_telemetry_session"
 
     monkeypatch.setattr(
         manager,
@@ -605,7 +352,7 @@ async def test_usage_threshold_checker_forces_billing_at_complete_turn(monkeypat
     async def fake_current_session_usage_spend(_agent_session, **_kwargs):
         nonlocal calls
         calls += 1
-        return 12.25, "hf_billing_current_session"
+        return 12.25, "app_telemetry_session"
 
     monkeypatch.setattr(
         manager,
@@ -648,7 +395,7 @@ async def test_usage_threshold_checker_uses_cached_spend_after_local_crossing(
     monkeypatch.setattr("usage.build_usage_response", fail_build_usage_response)
     agent_session.usage_warning_spend_cache = {
         "spend_usd": 4.5,
-        "billing_source": "hf_billing_current_session",
+        "billing_source": "app_telemetry_session",
         "expires_at": datetime.now(UTC) + timedelta(seconds=30),
     }
     manager._install_usage_threshold_checker(agent_session)
@@ -681,7 +428,7 @@ async def test_yolo_budget_checker_pauses_after_fresh_session_spend_crosses_cap(
         nonlocal calls
         calls += 1
         assert kwargs["use_cache"] is False
-        return 1.25, "hf_billing_current_session"
+        return 1.25, "app_telemetry_session"
 
     monkeypatch.setattr(
         manager,
@@ -702,7 +449,7 @@ async def test_yolo_budget_checker_pauses_after_fresh_session_spend_crosses_cap(
     assert pending["current_spend_usd"] == 1.25
     assert pending["cap_usd"] == 1.0
     assert pending["estimated_next_usd"] is None
-    assert pending["billing_source"] == "hf_billing_current_session"
+    assert pending["billing_source"] == "app_telemetry_session"
     assert agent_session.session.events[-1].event_type == "approval_required"
 
 
@@ -717,7 +464,7 @@ async def test_yolo_budget_checker_emits_session_update_under_cap(monkeypatch):
 
     async def fake_current_session_usage_spend(_agent_session, **kwargs):
         assert kwargs["use_cache"] is False
-        return 0.25, "hf_billing_current_session"
+        return 0.25, "app_telemetry_session"
 
     monkeypatch.setattr(
         manager,
@@ -759,7 +506,7 @@ async def test_yolo_budget_checker_emits_session_update_for_observed_spend(
 
     async def fake_current_session_usage_spend(_agent_session, **kwargs):
         assert kwargs["use_cache"] is False
-        return 0.0, "hf_billing_current_session"
+        return 0.0, "app_telemetry_session"
 
     monkeypatch.setattr(
         manager,
@@ -788,39 +535,6 @@ async def test_yolo_budget_checker_emits_session_update_for_observed_spend(
 
 
 @pytest.mark.asyncio
-async def test_usage_fetch_reconciles_yolo_ledger_from_hf_billing():
-    manager = _manager_with_store(NoopSessionStore())
-    agent_session = _runtime_agent_session("s1")
-    agent_session.session.auto_approval_enabled = True
-    agent_session.session.auto_approval_cost_cap_usd = 1.0
-    agent_session.session.auto_approval_estimated_spend_usd = 0.03
-    manager.sessions["s1"] = agent_session
-
-    summary = await manager.reconcile_session_auto_approval_from_usage(
-        "s1",
-        {
-            "session": {
-                "hf_jobs_estimated_usd": 0.0,
-                "sandbox_estimated_usd": 0.0,
-            },
-            "hf_account": {
-                "current_session": {
-                    "inference_providers_usd": 0.16,
-                }
-            },
-        },
-    )
-
-    assert summary == {
-        "enabled": True,
-        "cost_cap_usd": 1.0,
-        "estimated_spend_usd": 0.16,
-        "remaining_usd": 0.84,
-    }
-    assert agent_session.session.auto_approval_estimated_spend_usd == 0.16
-
-
-@pytest.mark.asyncio
 async def test_yolo_budget_checker_uses_local_ledger_when_billing_lags(monkeypatch):
     manager = _manager_with_store(NoopSessionStore())
     agent_session = _runtime_agent_session("s1")
@@ -831,7 +545,7 @@ async def test_yolo_budget_checker_uses_local_ledger_when_billing_lags(monkeypat
 
     async def fake_current_session_usage_spend(_agent_session, **kwargs):
         assert kwargs["use_cache"] is False
-        return 0.75, "hf_billing_current_session"
+        return 0.75, "app_telemetry_session"
 
     monkeypatch.setattr(
         manager,
@@ -850,7 +564,7 @@ async def test_yolo_budget_checker_uses_local_ledger_when_billing_lags(monkeypat
     assert pending["kind"] == YOLO_BUDGET_TOOL_NAME
     assert pending["current_spend_usd"] == 1.1
     assert pending["cap_usd"] == 1.0
-    assert pending["billing_source"] == "hf_billing_current_session"
+    assert pending["billing_source"] == "app_telemetry_session"
 
 
 def test_unknown_saved_model_defaults_to_glm():
@@ -883,7 +597,6 @@ def _install_fake_runtime(manager: SessionManager) -> asyncio.Event:
 
     def fake_create_session_sync(**kwargs: Any):
         return object(), FakeRuntimeSession(
-            hf_token=kwargs.get("hf_token"),
             user_plan=kwargs.get("user_plan"),
             model=kwargs.get("model") or "test-model",
         )
@@ -936,7 +649,7 @@ async def test_close_cancels_preload_and_deletes_owned_sandbox(monkeypatch):
             await asyncio.sleep(0)
         cancel_event.set()
 
-    session = FakeRuntimeSession(hf_token="token")
+    session = FakeRuntimeSession()
     session.session_id = "s1"
     session.persistence_store = NoopSessionStore()
     session.sandbox = SimpleNamespace(
@@ -953,7 +666,6 @@ async def test_close_cancels_preload_and_deletes_owned_sandbox(monkeypatch):
         tool_router=object(),  # type: ignore[arg-type]
         submission_queue=asyncio.Queue(),
         user_id="owner",
-        hf_token="token",
     )
 
     await manager.close()
@@ -977,47 +689,16 @@ async def test_close_closes_resources_when_sandbox_cleanup_fails():
     cleaned: list[str] = []
 
     async def fake_cleanup(session):
-        cleaned.append(session.hf_token)
-        if session.hf_token == "owner-token":
-            raise RuntimeError("boom")
+        cleaned.append(session)
+        raise RuntimeError("boom")
 
     manager._cleanup_sandbox = fake_cleanup  # type: ignore[method-assign]
 
     await manager.close()
 
-    assert cleaned == ["owner-token", "owner-token"]
+    assert len(cleaned) == 2
     assert gateway.closed is True
     assert persistence.closed is True
-
-
-@pytest.mark.asyncio
-async def test_existing_session_rejects_cross_user_token_overwrite():
-    manager = _manager_with_store(NoopSessionStore())
-    existing = _runtime_agent_session("s1", user_id="victim", hf_token="victim-token")
-    manager.sessions["s1"] = existing
-
-    result = await manager.ensure_session_loaded(
-        "s1", user_id="attacker", hf_token="attacker-token"
-    )
-
-    assert result is None
-    assert existing.hf_token == "victim-token"
-    assert existing.session.hf_token == "victim-token"
-
-
-@pytest.mark.asyncio
-async def test_existing_session_updates_token_after_access_check():
-    manager = _manager_with_store(NoopSessionStore())
-    existing = _runtime_agent_session("s1", user_id="owner", hf_token="old-token")
-    manager.sessions["s1"] = existing
-
-    result = await manager.ensure_session_loaded(
-        "s1", user_id="owner", hf_token="new-token"
-    )
-
-    assert result is existing
-    assert existing.hf_token == "new-token"
-    assert existing.session.hf_token == "new-token"
 
 
 @pytest.mark.asyncio
@@ -1031,101 +712,6 @@ async def test_existing_session_updates_plan_after_access_check():
     assert result is existing
     assert existing.user_plan == "pro"
     assert existing.session.user_plan == "pro"
-
-
-@pytest.mark.asyncio
-async def test_existing_session_retries_preload_after_token_recovered():
-    manager = _manager_with_store(NoopSessionStore())
-    existing = _runtime_agent_session("s1", user_id="owner", hf_token=None)
-    done_task = asyncio.get_running_loop().create_future()
-    done_task.set_result(None)
-    existing.session.sandbox_preload_task = done_task
-    existing.session.sandbox_preload_error = (
-        "No HF token available. Cannot create sandbox."
-    )
-    manager.sessions["s1"] = existing
-    started: list[str] = []
-
-    def fake_start_cpu_sandbox_preload(agent_session):
-        started.append(agent_session.session_id)
-
-    manager._start_cpu_sandbox_preload = fake_start_cpu_sandbox_preload  # type: ignore[method-assign]
-
-    result = await manager.ensure_session_loaded(
-        "s1",
-        user_id="owner",
-        hf_token="new-token",
-    )
-
-    assert result is existing
-    assert existing.hf_token == "new-token"
-    assert existing.session.hf_token == "new-token"
-    assert existing.session.sandbox_preload_error is None
-    assert existing.session.sandbox_preload_task is None
-    assert started == ["s1"]
-
-
-@pytest.mark.asyncio
-async def test_existing_session_does_not_retry_preload_when_disabled():
-    manager = _manager_with_store(NoopSessionStore())
-    existing = _runtime_agent_session("s1", user_id="owner", hf_token=None)
-    done_task = asyncio.get_running_loop().create_future()
-    done_task.set_result(None)
-    existing.session.sandbox_preload_task = done_task
-    existing.session.sandbox_preload_error = (
-        "No HF token available. Cannot create sandbox."
-    )
-    manager.sessions["s1"] = existing
-    started: list[str] = []
-
-    def fake_start_cpu_sandbox_preload(agent_session):
-        started.append(agent_session.session_id)
-
-    manager._start_cpu_sandbox_preload = fake_start_cpu_sandbox_preload  # type: ignore[method-assign]
-
-    result = await manager.ensure_session_loaded(
-        "s1",
-        user_id="owner",
-        hf_token="new-token",
-        preload_sandbox=False,
-    )
-
-    assert result is existing
-    assert existing.hf_token == "new-token"
-    assert existing.session.hf_token == "new-token"
-    assert existing.session.sandbox_preload_error == (
-        "No HF token available. Cannot create sandbox."
-    )
-    assert started == []
-
-
-@pytest.mark.asyncio
-async def test_existing_session_does_not_restart_preload_after_teardown():
-    manager = _manager_with_store(NoopSessionStore())
-    existing = _runtime_agent_session("s1", user_id="owner", hf_token="token")
-    done_task = asyncio.get_running_loop().create_future()
-    done_task.set_result(None)
-    existing.session.sandbox = None
-    existing.session.sandbox_preload_task = done_task
-    existing.session.sandbox_preload_error = None
-    manager.sessions["s1"] = existing
-    started: list[str] = []
-
-    def fake_start_cpu_sandbox_preload(agent_session):
-        started.append(agent_session.session_id)
-
-    manager._start_cpu_sandbox_preload = fake_start_cpu_sandbox_preload  # type: ignore[method-assign]
-
-    result = await manager.ensure_session_loaded(
-        "s1",
-        user_id="owner",
-        hf_token="token",
-    )
-
-    assert result is existing
-    assert existing.session.sandbox_preload_task is done_task
-    assert existing.session.sandbox_preload_error is None
-    assert started == []
 
 
 @pytest.mark.asyncio
@@ -1171,7 +757,6 @@ async def test_create_session_schedules_cpu_sandbox_preload():
     try:
         session_id = await manager.create_session(
             user_id="owner",
-            hf_token="token",
             user_plan="pro",
         )
 
@@ -1222,13 +807,8 @@ async def test_lazy_restore_deletes_persisted_sandbox_before_preload(monkeypatch
     deleted: list[tuple[str, str, str]] = []
 
     class FakeApi:
-        def __init__(self, token=None):
-            self.token = token
-
         def delete_repo(self, repo_id, repo_type):
-            deleted.append((self.token, repo_id, repo_type))
-
-    monkeypatch.setattr("huggingface_hub.HfApi", FakeApi)
+            deleted.append((repo_id, repo_type))
 
     store = RestoreStore(
         metadata={
@@ -1256,11 +836,10 @@ async def test_lazy_restore_deletes_persisted_sandbox_before_preload(monkeypatch
         restored = await manager.ensure_session_loaded(
             "persisted-session",
             user_id="owner",
-            hf_token="user-token",
         )
 
         assert restored is not None
-        assert deleted == [("user-token", "owner/sandbox-12345678", "space")]
+        assert deleted == [("owner/sandbox-12345678", "space")]
         assert scheduled == ["persisted-session"]
         assert store.metadata["sandbox_space_id"] is None
         assert store.metadata["sandbox_status"] == "destroyed"
@@ -1274,13 +853,8 @@ async def test_lazy_restore_can_skip_cpu_sandbox_preload_after_cleanup(monkeypat
     deleted: list[str] = []
 
     class FakeApi:
-        def __init__(self, token=None):
-            self.token = token
-
         def delete_repo(self, repo_id, repo_type):
             deleted.append(repo_id)
-
-    monkeypatch.setattr("huggingface_hub.HfApi", FakeApi)
 
     store = RestoreStore(
         metadata={
@@ -1305,7 +879,6 @@ async def test_lazy_restore_can_skip_cpu_sandbox_preload_after_cleanup(monkeypat
         restored = await manager.ensure_session_loaded(
             "persisted-session",
             user_id="owner",
-            hf_token="user-token",
             preload_sandbox=False,
         )
 

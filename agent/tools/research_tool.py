@@ -38,15 +38,15 @@ _RESEARCH_CONTEXT_MAX = 190_000
 RESEARCH_TOOL_NAMES = {
     "read",
     "bash",
-    "explore_hf_docs",
-    "fetch_hf_docs",
-    "find_hf_api",
-    "hf_papers",
+    "explore_docs",
+    "fetch_docs",
+    "find_api",
+    "papers",
     "github_find_examples",
     "github_list_repos",
     "github_read_file",
     "web_search",
-    "hf_inspect_dataset",
+    "inspect_dataset",
 }
 
 
@@ -115,8 +115,8 @@ tell you what actually works.
    - The training method and configuration (optimizer, lr, schedule, epochs, batch size)
    - The results those choices produced (benchmark scores, metrics, comparisons)
 4. **Attribute results to recipes**: This is the critical step. Every finding must link a RESULT to the RECIPE that produced it. "Dataset X + method Y + lr Z → score W on benchmark V" is useful. "They used SFT" is not.
-5. **Validate datasets**: For the most promising datasets, check if they exist on HF Hub with `hf_inspect_dataset`. Verify format matches the training method. Report if doesnt.
-6. **Find code**: Now find working implementation code via `github_find_examples` and `github_read_file`. Use docs (`explore_hf_docs`, `fetch_hf_docs`) to fill in API details.
+5. **Validate datasets**: For the most promising datasets, check if they exist with `inspect_dataset`. Verify format matches the training method. Report if doesnt.
+6. **Find code**: Now find working implementation code via `github_find_examples` and `github_read_file`. Use docs (`explore_docs`, `fetch_docs`) to fill in API details.
 
 ## When to go deeper
 
@@ -128,33 +128,33 @@ tell you what actually works.
 # How to use your tools
 
 ## Papers & citations (USE FIRST)
-- `hf_papers(operation="search", query=...)`: Search papers (HF-tuned for ML)
-- `hf_papers(operation="search", query=..., min_citations=50, sort_by="citationCount")`: Find highly-cited papers via Semantic Scholar
-- `hf_papers(operation="search", query=..., date_from="2024-01-01")`: Search with date filter
-- `hf_papers(operation="paper_details", arxiv_id=...)`: Metadata, citations, TL;DR
-- `hf_papers(operation="citation_graph", arxiv_id=...)`: References + citations with influence flags and intents
-- `hf_papers(operation="read_paper", arxiv_id=..., section="3")`: Read a specific section's full text
-- `hf_papers(operation="read_paper", arxiv_id=...)`: Get TOC (abstract + section list) — use this to find which section numbers contain methodology/experiments
-- `hf_papers(operation="snippet_search", query=...)`: Semantic search across 12M+ full-text paper passages
-- `hf_papers(operation="recommend", arxiv_id=...)`: Find related papers
-- `hf_papers(operation="find_datasets", arxiv_id=...)`: Find HF datasets linked to a paper
-- `hf_papers(operation="find_all_resources", arxiv_id=...)`: Datasets + models + collections for a paper
+- `papers(operation="search", query=...)`: Search papers
+- `papers(operation="search", query=..., min_citations=50, sort_by="citationCount")`: Find highly-cited papers via Semantic Scholar
+- `papers(operation="search", query=..., date_from="2024-01-01")`: Search with date filter
+- `papers(operation="paper_details", arxiv_id=...)`: Metadata, citations, TL;DR
+- `papers(operation="citation_graph", arxiv_id=...)`: References + citations with influence flags and intents
+- `papers(operation="read_paper", arxiv_id=..., section="3")`: Read a specific section's full text
+- `papers(operation="read_paper", arxiv_id=...)`: Get TOC (abstract + section list) — use this to find which section numbers contain methodology/experiments
+- `papers(operation="snippet_search", query=...)`: Semantic search across 12M+ full-text paper passages
+- `papers(operation="recommend", arxiv_id=...)`: Find related papers
+- `papers(operation="find_datasets", arxiv_id=...)`: Find datasets linked to a paper
+- `papers(operation="find_all_resources", arxiv_id=...)`: Datasets + models + collections for a paper
 
 ## Dataset inspection
-- `hf_inspect_dataset`: Check dataset schema, splits, sample rows
+- `inspect_dataset`: Check dataset schema, splits, sample rows
   CRITICAL for training: verify column format matches training method:
   - SFT: needs "messages", "text", or "prompt"/"completion"
   - DPO: needs "prompt", "chosen", "rejected"
   - GRPO: needs "prompt" only
 
 ## GitHub code research
-- `github_find_examples`: Find working example scripts in HF repos (trl, transformers, etc.)
+- `github_find_examples`: Find working example scripts in repos (trl, transformers, etc.)
 - `github_read_file`: Read the actual implementation code. Use line_start/line_end for large files.
 
 ## Documentation
-- `explore_hf_docs(endpoint)`: Search docs for a library. Endpoints: trl, transformers, datasets, peft, accelerate, trackio, vllm, inference-endpoints, etc.
-- `fetch_hf_docs(url)`: Fetch full page content from explore results
-- `find_hf_api(query=..., tag=...)`: Find REST API endpoints
+- `explore_docs(endpoint)`: Search docs for a library. Endpoints: trl, transformers, datasets, peft, accelerate, trackio, vllm, inference-endpoints, etc.
+- `fetch_docs(url)`: Fetch full page content from explore results
+- `find_api(query=..., tag=...)`: Find REST API endpoints
 - `web_search(query=..., allowed_domains=[...], blocked_domains=[...])`:
   Search the current web when papers/docs/GitHub are not enough.
 
@@ -162,27 +162,27 @@ tell you what actually works.
 
 ```
 # 1. Find anchor paper(s) for the task
-hf_papers({"operation": "search", "query": "GPQA graduate questions", "sort_by": "citationCount"})
+papers({"operation": "search", "query": "GPQA graduate questions", "sort_by": "citationCount"})
 
 # 2. Crawl citation graph — look downstream
-hf_papers({"operation": "citation_graph", "arxiv_id": "2311.12022", "direction": "citations"})
+papers({"operation": "citation_graph", "arxiv_id": "2311.12022", "direction": "citations"})
 
 # 3. Read methodology of promising downstream papers
-hf_papers({"operation": "read_paper", "arxiv_id": "2604.01348"})  # TOC first
-hf_papers({"operation": "read_paper", "arxiv_id": "2604.01348", "section": "3"})  # Methodology
-hf_papers({"operation": "read_paper", "arxiv_id": "2604.01348", "section": "4"})  # Experiments
+papers({"operation": "read_paper", "arxiv_id": "2604.01348"})  # TOC first
+papers({"operation": "read_paper", "arxiv_id": "2604.01348", "section": "3"})  # Methodology
+papers({"operation": "read_paper", "arxiv_id": "2604.01348", "section": "4"})  # Experiments
 
 # 4. Find datasets used by these papers
-hf_papers({"operation": "find_datasets", "arxiv_id": "2604.01348"})
-hf_papers({"operation": "find_all_resources", "arxiv_id": "2604.01348"})
+papers({"operation": "find_datasets", "arxiv_id": "2604.01348"})
+papers({"operation": "find_all_resources", "arxiv_id": "2604.01348"})
 
 # 5. Validate datasets exist and have correct format
-hf_inspect_dataset({"dataset": "org/dataset-name", "split": "train", "sample_rows": 3})
+inspect_dataset({"dataset": "org/dataset-name", "split": "train", "sample_rows": 3})
 
 # 6. Now get working code for the training method
 github_find_examples({"repo": "trl", "keyword": "sft"})
 github_read_file({"repo": "platformops/trl", "path": "examples/scripts/sft.py"})
-explore_hf_docs("trl")
+explore_docs("trl")
 ```
 
 # Output format
@@ -234,7 +234,7 @@ RESEARCH_TOOL_SPEC = {
         "- Exploring HF docs, reading papers, analyzing GitHub repos\n"
         "- Any research where raw tool outputs would be too verbose\n\n"
         "The sub-agent knows how to use github_find_examples, github_read_file, "
-        "explore_hf_docs, fetch_hf_docs, hf_inspect_dataset, hf_papers, etc. "
+        "explore_docs, fetch_docs, inspect_dataset, papers, etc. "
         "Just describe what you need researched."
     ),
     "parameters": {
@@ -246,10 +246,9 @@ RESEARCH_TOOL_SPEC = {
                     "Detailed description of what to research. Be specific: "
                     "include library names, trainer types, dataset names, "
                     "repo names, or doc pages to explore. Example: "
-                    "'Research current TRL SFTTrainer usage: find working "
-                    "example scripts, read the SFT documentation, and check "
-                    "SFTConfig parameters. Also validate that dataset "
-                    "HuggingFaceH4/ultrachat_200k has the right format for SFT.'"
+"'Research current TRL SFTTrainer usage: find working "
+                     "example scripts, read the SFT documentation, and check "
+                     "SFTConfig parameters. Also validate that a dataset has the right format for SFT.'"
                 ),
             },
             "context": {

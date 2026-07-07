@@ -7,12 +7,11 @@ dependency. In dev mode (no OAUTH_CLIENT_ID), auth is bypassed automatically.
 import asyncio
 import json
 import logging
-import os
 from datetime import datetime
 from typing import Any
 
+# pyrefly: ignore [missing-import]
 from dependencies import (
-    INTERNAL_HF_TOKEN_KEY,
     get_current_user,
 )
 from fastapi import (
@@ -23,18 +22,10 @@ from fastapi import (
 )
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import StreamingResponse
-from huggingface_hub.errors import HfHubHTTPError
-from litellm import Message, acompletion
+from litellm import acompletion
 from pydantic import ValidationError
-from starlette.datastructures import FormData, UploadFile
-from dataset_uploads import (
-    MAX_DATASET_UPLOAD_BYTES,
-    dataset_context_note,
-    push_dataset_upload_to_hub,
-)
 from models import (
     ApprovalRequest,
-    DatasetUploadResponse,
     HealthResponse,
     LLMHealthResponse,
     SessionInfo,
@@ -52,9 +43,6 @@ from session_manager import (
     session_manager,
 )
 
-from agent.core.hf_access import get_jobs_access
-from agent.core.hf_tokens import clean_hf_token, resolve_hf_request_token
-from agent.core.local_models import local_model_provider
 from agent.core.llm_params import _resolve_llm_params
 from agent.core.model_ids import (
     CLAUDE_OPUS_48_MODEL_ID,
@@ -63,7 +51,6 @@ from agent.core.model_ids import (
     GPT_55_MODEL_ID,
     KIMI_K27_CODE_MODEL_ID,
     MINIMAX_M3_MODEL_ID,
-    strip_platformops_model_prefix,
 )
 from agent.core.prompt_caching import with_prompt_cache_params
 from usage import build_usage_response
@@ -75,7 +62,6 @@ _background_route_tasks: set[asyncio.Task] = set()
 
 DEFAULT_GPT_MODEL_ID = GPT_55_MODEL_ID
 DEFAULT_MODEL_ID = GLM_52_MODEL_ID
-DATASET_UPLOAD_MULTIPART_SLACK_BYTES = 1024 * 1024
 
 
 async def _reset_usage_window(session_id: str) -> dict[str, Any] | None:
@@ -85,34 +71,20 @@ async def _reset_usage_window(session_id: str) -> dict[str, Any] | None:
     )
 
 
-async def _refresh_usage_and_upload(
-    agent_session: AgentSession,
-    *,
-    error_code: str,
-) -> None:
+async def _save_session(agent_session: AgentSession) -> None:
     session = agent_session.session
     try:
-        await session_manager.refresh_session_usage_metrics(
-            agent_session,
-            error_code=error_code,
-        )
         session.save_and_upload_detached(session.config.session_dataset_repo)
     except Exception as e:
         logger.warning(
-            "Background usage refresh/upload failed for %s: %s",
+            "Background session save failed for %s: %s",
             agent_session.session_id,
             e,
         )
 
 
-def _schedule_usage_refresh_and_upload(
-    agent_session: AgentSession,
-    *,
-    error_code: str,
-) -> None:
-    task = asyncio.create_task(
-        _refresh_usage_and_upload(agent_session, error_code=error_code)
-    )
+def _schedule_session_save(agent_session: AgentSession) -> None:
+    task = asyncio.create_task(_save_session(agent_session))
     _background_route_tasks.add(task)
     task.add_done_callback(_background_route_tasks.discard)
 
@@ -173,74 +145,6 @@ def _model_override_for_new_session(requested_model: str | None) -> str | None:
     return requested_model or _default_model()
 
 
-def _user_hf_token(user: dict[str, Any] | None) -> str | None:
-    if not isinstance(user, dict):
-        return None
-    return user.get(INTERNAL_HF_TOKEN_KEY)
-
-
-def _model_requires_hf_router_token(model_id: str | None) -> bool:
-    normalized = strip_platformops_model_prefix(model_id) or model_id or ""
-    return local_model_provider(normalized) is None
-
-
-def _reject_oversize_dataset_upload(request: Request) -> None:
-    raw_content_length = request.headers.get("content-length")
-    if raw_content_length is None:
-        return
-    try:
-        content_length = int(raw_content_length)
-    except (TypeError, ValueError):
-        return
-    if content_length > MAX_DATASET_UPLOAD_BYTES + DATASET_UPLOAD_MULTIPART_SLACK_BYTES:
-        raise HTTPException(
-            status_code=413,
-            detail="Dataset upload exceeds the 100 MB limit.",
-        )
-
-
-def _dataset_upload_file_from_form(form: FormData) -> UploadFile:
-    uploaded_files = [
-        (key, value)
-        for key, value in form.multi_items()
-        if isinstance(value, UploadFile)
-    ]
-    if len(uploaded_files) != 1:
-        raise HTTPException(
-            status_code=400,
-            detail="Upload exactly one dataset file.",
-        )
-    field_name, upload = uploaded_files[0]
-    if field_name != "file":
-        raise HTTPException(
-            status_code=400,
-            detail="Missing 'file' upload field.",
-        )
-    return upload
-
-
-def _dataset_upload_hub_http_exception(error: HfHubHTTPError) -> HTTPException:
-    status_code = getattr(error.response, "status_code", None)
-    if status_code == 401:
-        detail = "PlatformOps rejected the token used for the dataset upload."
-        return HTTPException(status_code=401, detail=detail)
-    if status_code == 403:
-        detail = (
-            "PlatformOps denied permission to create or write to the dataset repo."
-        )
-        return HTTPException(status_code=403, detail=detail)
-    if status_code == 404:
-        detail = "Could not find the PlatformOps namespace or dataset repo."
-        return HTTPException(status_code=404, detail=detail)
-    if status_code == 429:
-        detail = "PlatformOps Hub rate limit reached while uploading the dataset."
-        return HTTPException(status_code=429, detail=detail)
-    return HTTPException(
-        status_code=502,
-        detail="PlatformOps Hub upload failed. Please try again.",
-    )
-
-
 async def _check_session_access(
     session_id: str,
     user: dict[str, Any],
@@ -248,17 +152,9 @@ async def _check_session_access(
     preload_sandbox: bool = True,
 ) -> AgentSession:
     """Verify and lazily load the user's session. Raises 403 or 404."""
-    hf_token = (
-        resolve_hf_request_token(request)
-        if request is not None
-        else _user_hf_token(user)
-    )
     agent_session = await session_manager.ensure_session_loaded(
         session_id,
         user["user_id"],
-        hf_token=hf_token,
-        hf_username=user.get("username"),
-        user_plan=user.get("plan"),
         preload_sandbox=preload_sandbox,
     )
     if not agent_session:
@@ -298,14 +194,10 @@ async def llm_health_check(
     - timeout / network → provider unreachable
     """
     model = _default_model()
-    hf_token = resolve_hf_request_token(request)
-    if _model_requires_hf_router_token(model) and not hf_token:
-        return LLMHealthResponse(status="skipped", model=model)
 
     try:
         llm_params = _resolve_llm_params(
             model,
-            hf_token,
             reasoning_effort="high",
         )
         await acompletion(
@@ -376,7 +268,6 @@ async def generate_title(
         await _check_session_access(request.session_id, user)
         llm_params = _resolve_llm_params(
             "openai/gpt-oss-120b:cerebras",
-            _user_hf_token(user),
             reasoning_effort="low",
         )
         llm_params = with_prompt_cache_params(llm_params)
@@ -431,18 +322,11 @@ async def create_session(
 ) -> SessionResponse:
     """Create a new agent session bound to the authenticated user.
 
-    The user's HF access token is extracted from the Authorization header
-    and stored in the session so that tools (e.g. hf_jobs) can act on
-    behalf of the user.
-
     Optional body ``{"model"?: <id>}`` selects the session's LLM; unknown
     ids are rejected (400). Empty requests use the web default.
 
     Returns 503 if the server or user has reached the session limit.
     """
-    # Extract the user's HF token (Bearer header, HttpOnly cookie, or env var)
-    hf_token = resolve_hf_request_token(request)
-
     # Optional model override. Empty body falls back to the config default.
     model: str | None = None
     try:
@@ -460,11 +344,7 @@ async def create_session(
     try:
         session_id = await session_manager.create_session(
             user_id=user["user_id"],
-            hf_username=user.get("username"),
-            hf_token=hf_token,
-            user_plan=user.get("plan"),
             model=model,
-            is_pro=user.get("plan") == "pro",
         )
     except SessionCapacityError as e:
         raise HTTPException(status_code=503, detail=str(e))
@@ -494,8 +374,6 @@ async def restore_session_summary(
     if not isinstance(messages, list) or not messages:
         raise HTTPException(status_code=400, detail="Missing 'messages' array")
 
-    hf_token = resolve_hf_request_token(request)
-
     model = body.get("model")
     _validate_model_id(model)
 
@@ -504,11 +382,7 @@ async def restore_session_summary(
     try:
         session_id = await session_manager.create_session(
             user_id=user["user_id"],
-            hf_username=user.get("username"),
-            hf_token=hf_token,
-            user_plan=user.get("plan"),
             model=model,
-            is_pro=user.get("plan") == "pro",
         )
     except SessionCapacityError as e:
         raise HTTPException(status_code=503, detail=str(e))
@@ -612,83 +486,6 @@ async def set_session_notifications(
     }
 
 
-@router.post("/session/{session_id}/datasets", response_model=DatasetUploadResponse)
-async def upload_session_dataset(
-    session_id: str,
-    request: Request,
-    user: dict = Depends(get_current_user),
-) -> DatasetUploadResponse:
-    """Upload a CSV/JSON dataset file to a private Hub dataset for this session."""
-    file: UploadFile | None = None
-    try:
-        _reject_oversize_dataset_upload(request)
-        agent_session = await _check_session_access(session_id, user, request)
-        if not agent_session or not agent_session.is_active:
-            raise HTTPException(status_code=404, detail="Session not found")
-        if agent_session.is_processing:
-            raise HTTPException(
-                status_code=409,
-                detail="Cannot upload a dataset while the agent is processing.",
-            )
-        if agent_session.session.pending_approval:
-            raise HTTPException(
-                status_code=409,
-                detail="Resolve pending approvals before uploading a dataset.",
-            )
-
-        hf_token = (
-            resolve_hf_request_token(request, include_env_fallback=False)
-            or _user_hf_token(user)
-            or resolve_hf_request_token(request)
-            or clean_hf_token(os.environ.get("HF_TOKEN"))
-        )
-
-        form = await request.form(
-            max_files=1,
-            max_fields=1,
-            max_part_size=MAX_DATASET_UPLOAD_BYTES,
-        )
-        file = _dataset_upload_file_from_form(form)
-        hf_username = user.get("username") or agent_session.hf_username
-        uploaded = await push_dataset_upload_to_hub(
-            upload=file,
-            session_id=session_id,
-            hf_username=hf_username,
-            hf_token=hf_token,
-        )
-        agent_session.session.context_manager.add_message(
-            Message(role="user", content=dataset_context_note(uploaded))
-        )
-        session_manager._touch(agent_session)
-        await session_manager.persist_session_snapshot(agent_session)
-        logger.info(
-            "Uploaded dataset file %s to %s for session %s",
-            uploaded.filename,
-            uploaded.repo_id,
-            session_id,
-        )
-        return DatasetUploadResponse(**uploaded.response_payload())
-    except HTTPException:
-        raise
-    except HfHubHTTPError as e:
-        logger.warning(
-            "Hub rejected dataset upload for session %s: status=%s request_id=%s",
-            session_id,
-            getattr(e.response, "status_code", None),
-            getattr(e, "request_id", None),
-        )
-        raise _dataset_upload_hub_http_exception(e)
-    except Exception:
-        logger.exception("Dataset upload failed for session %s", session_id)
-        raise HTTPException(
-            status_code=502,
-            detail="Dataset upload failed. Please try again.",
-        )
-    finally:
-        if file is not None:
-            await file.close()
-
-
 @router.patch("/session/{session_id}/yolo")
 async def set_session_yolo(
     session_id: str,
@@ -709,26 +506,6 @@ async def set_session_yolo(
     return {"session_id": session_id, **summary}
 
 
-@router.get("/user/jobs-access")
-async def get_jobs_access_info(
-    request: Request, user: dict = Depends(get_current_user)
-) -> dict:
-    """Return the namespaces the current token can run HF Jobs under.
-
-    Credits are enforced by the HF API at job-creation time, not here —
-    the response only describes which wallets the caller is allowed to
-    pick from. Pro is irrelevant.
-    """
-    token = resolve_hf_request_token(request)
-
-    access = await get_jobs_access(token or "")
-    return {
-        "eligible_namespaces": access.eligible_namespaces if access else [],
-        "default_namespace": access.default_namespace if access else None,
-        "billing_url": "https://platformops.co/settings/billing",
-    }
-
-
 @router.get("/usage", response_model=UsageResponse)
 async def get_usage(
     request: Request,
@@ -747,11 +524,6 @@ async def get_usage(
     usage = await build_usage_response(
         session_manager,
         user_id=user["user_id"],
-        hf_token=(
-            resolve_hf_request_token(request, include_env_fallback=False)
-            or _user_hf_token(user)
-            or resolve_hf_request_token(request)
-        ),
         session_id=session_id,
         timezone_name=tz,
     )
@@ -932,10 +704,7 @@ async def record_pro_click(
         target=str(body.get("target") or "pro_pricing"),
     )
     if agent_session.session.config.save_sessions:
-        _schedule_usage_refresh_and_upload(
-            agent_session,
-            error_code="pro_click_billing_snapshot_error",
-        )
+        _schedule_session_save(agent_session)
     return {"status": "ok"}
 
 
@@ -1177,8 +946,5 @@ async def submit_feedback(
     # Fire-and-forget save so feedback reaches the dataset even if the user
     # closes the tab right after clicking.
     if agent_session.session.config.save_sessions:
-        _schedule_usage_refresh_and_upload(
-            agent_session,
-            error_code="feedback_billing_snapshot_error",
-        )
+        _schedule_session_save(agent_session)
     return {"status": "ok"}

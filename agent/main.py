@@ -23,16 +23,12 @@ import litellm
 from prompt_toolkit import PromptSession
 
 from agent.config import load_config
-from agent.core.approval_policy import is_scheduled_operation
 from agent.core.agent_loop import submission_loop
 from agent.core import model_switcher
-from agent.core.hf_access import fetch_whoami_v2, normalize_hf_user_plan
-from agent.core.hf_tokens import resolve_hf_token
 from agent.core.model_ids import strip_platformops_model_prefix
 from agent.core.session import OpType
 from agent.core.tools import ToolRouter
 from agent.messaging.gateway import NotificationGateway
-from agent.utils.reliability_checks import check_training_script_save_pattern
 from agent.utils.terminal_display import (
     get_console,
     print_approval_header,
@@ -104,20 +100,6 @@ async def _wait_for_initial_sandbox_preload(session_holder: list | None) -> None
         return
 
 
-def _is_scheduled_hf_job_tool(tool_info: dict[str, Any]) -> bool:
-    if tool_info.get("tool") != "hf_jobs":
-        return False
-    arguments = tool_info.get("arguments") or {}
-    if isinstance(arguments, str):
-        try:
-            arguments = json.loads(arguments)
-        except json.JSONDecodeError:
-            return False
-    if not isinstance(arguments, dict):
-        return False
-    return is_scheduled_operation(arguments.get("operation"))
-
-
 def _configure_runtime_logging() -> None:
     """Keep third-party warning spam from punching through the interactive UI."""
     import logging
@@ -126,44 +108,15 @@ def _configure_runtime_logging() -> None:
     logging.getLogger("litellm").setLevel(logging.ERROR)
 
 
-def _safe_get_args(arguments: dict) -> dict:
-    """Safely extract args dict from arguments, handling cases where LLM passes string."""
-    args = arguments.get("args", {})
-    # Sometimes LLM passes args as string instead of dict
-    if isinstance(args, str):
-        return {}
-    return args if isinstance(args, dict) else {}
+def resolve_token() -> str | None:
+    """Resolve token from environment variables."""
+    import os
+
+    return os.environ.get("HF_TOKEN") or os.environ.get("ADMIN_TOKEN") or None
 
 
-def _get_hf_user(token: str | None) -> str | None:
-    """Resolve the HF username for a token, if available."""
-    if not token:
-        return None
-    try:
-        from huggingface_hub import HfApi
-
-        return HfApi(token=token).whoami().get("name")
-    except Exception:
-        return None
-
-
-def _get_hf_user_from_whoami(whoami: dict[str, Any] | None) -> str | None:
-    if not isinstance(whoami, dict):
-        return None
-    for key in ("name", "user", "preferred_username"):
-        value = whoami.get(key)
-        if isinstance(value, str) and value:
-            return value
-    return None
-
-
-async def _get_hf_identity(token: str | None) -> tuple[str | None, str]:
-    if not token:
-        return None, "unknown"
-    whoami = await fetch_whoami_v2(token)
-    if whoami is None:
-        return _get_hf_user(token), "unknown"
-    return _get_hf_user_from_whoami(whoami), normalize_hf_user_plan(whoami) or "unknown"
+async def _get_user_identity(token: str | None) -> tuple[str | None, str]:
+    return None, "unknown"
 
 
 async def _model_picker(
@@ -213,21 +166,20 @@ async def _model_picker(
             config,
             session,
             console,
-            resolve_hf_token(),
+            resolve_token(),
         )
 
 
-async def _prompt_and_save_hf_token(prompt_session: PromptSession) -> str | None:
-    """Prompt user for HF token, validate it, save via huggingface_hub.login(). Returns None if skipped."""
+async def _prompt_and_save_token(prompt_session: PromptSession) -> str | None:
+    """Prompt user for a token, validate it. Returns None if skipped."""
     from prompt_toolkit.formatted_text import HTML
-    from huggingface_hub import HfApi, login
 
     print("\nOptionally provide a PlatformOps token for additional features.")
     print("Get one at: https://platformops.co/settings/tokens\n")
 
     try:
         token = await prompt_session.prompt_async(
-            HTML("<b>Paste your HF token (or leave empty to skip): </b>")
+            HTML("<b>Paste your token (or leave empty to skip): </b>")
         )
     except (EOFError, KeyboardInterrupt):
         return None
@@ -238,22 +190,22 @@ async def _prompt_and_save_hf_token(prompt_session: PromptSession) -> str | None
 
     # Validate token against the API
     try:
-        api = HfApi(token=token)
-        user_info = api.whoami()
-        username = user_info.get("name", "unknown")
-        print(f"Token valid (user: {username})")
+        import httpx
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                "https://platformops.co/oauth/userinfo",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            if resp.status_code == 200:
+                user_info = resp.json()
+                username = user_info.get("preferred_username", "unknown")
+                print(f"Token valid (user: {username})")
+            else:
+                print("Invalid token. Skipping.")
+                return None
     except Exception:
         print("Invalid token. Skipping.")
         return None
-
-    # Save for future sessions
-    try:
-        login(token=token, add_to_git_credential=False)
-        print("Token saved to ~/.cache/platformops/token")
-    except Exception as e:
-        print(
-            f"Warning: could not persist token ({e}), using for this session only."
-        )
 
     return token
 
@@ -576,13 +528,7 @@ async def event_listener(
                 tools_data = event.data.get("tools", []) if event.data else []
                 count = event.data.get("count", 0) if event.data else 0
 
-                # If yolo mode is active, auto-approve everything except
-                # scheduled HF jobs, whose recurring cost stays manual.
-                if (
-                    config
-                    and config.yolo_mode
-                    and not any(_is_scheduled_hf_job_tool(t) for t in tools_data)
-                ):
+                if config and config.yolo_mode:
                     approvals = [
                         {
                             "tool_call_id": t.get("tool_call_id", ""),
@@ -623,108 +569,6 @@ async def event_listener(
                     operation = arguments.get("operation", "")
 
                     print_approval_item(i, count, tool_name, operation)
-
-                    # Handle different tool types
-                    if tool_name == "hf_jobs":
-                        # Check if this is Python mode (script) or Docker mode (command)
-                        script = arguments.get("script")
-                        command = arguments.get("command")
-
-                        if script:
-                            # Python mode
-                            dependencies = arguments.get("dependencies", [])
-                            python_version = arguments.get("python")
-                            script_args = arguments.get("script_args", [])
-
-                            # Show full script
-                            print(f"Script:\n{script}")
-                            if dependencies:
-                                print(f"Dependencies: {', '.join(dependencies)}")
-                            if python_version:
-                                print(f"Python version: {python_version}")
-                            if script_args:
-                                print(f"Script args: {' '.join(script_args)}")
-
-                            # Run reliability checks on the full script (not truncated)
-                            check_message = check_training_script_save_pattern(script)
-                            if check_message:
-                                print(check_message)
-                        elif command:
-                            # Docker mode
-                            image = arguments.get("image", "python:3.12")
-                            command_str = (
-                                " ".join(command)
-                                if isinstance(command, list)
-                                else str(command)
-                            )
-                            print(f"Docker image: {image}")
-                            print(f"Command: {command_str}")
-
-                        # Common parameters for jobs
-                        hardware_flavor = arguments.get("hardware_flavor", "cpu-basic")
-                        timeout = arguments.get("timeout", "30m")
-                        env = arguments.get("env", {})
-                        schedule = arguments.get("schedule")
-
-                        print(f"Hardware: {hardware_flavor}")
-                        print(f"Timeout: {timeout}")
-
-                        if env:
-                            env_keys = ", ".join(env.keys())
-                            print(f"Environment variables: {env_keys}")
-
-                        if schedule:
-                            print(f"Schedule: {schedule}")
-
-                    elif tool_name == "hf_private_repos":
-                        # Handle private repo operations
-                        args = _safe_get_args(arguments)
-
-                        if operation in ["create_repo", "upload_file"]:
-                            repo_id = args.get("repo_id", "")
-                            repo_type = args.get("repo_type", "dataset")
-
-                            # Build repo URL
-                            type_path = "" if repo_type == "model" else f"{repo_type}s"
-                            repo_url = (
-                                f"https://platformops.co/{type_path}/{repo_id}".replace(
-                                    "//", "/"
-                                )
-                            )
-
-                            print(f"Repository: {repo_id}")
-                            print(f"Type: {repo_type}")
-                            print("Private: Yes")
-                            print(f"URL: {repo_url}")
-
-                            # Show file preview for upload_file operation
-                            if operation == "upload_file":
-                                path_in_repo = args.get("path_in_repo", "")
-                                file_content = args.get("file_content", "")
-                                print(f"File: {path_in_repo}")
-
-                                if isinstance(file_content, str):
-                                    # Calculate metrics
-                                    all_lines = file_content.split("\n")
-                                    line_count = len(all_lines)
-                                    size_bytes = len(file_content.encode("utf-8"))
-                                    size_kb = size_bytes / 1024
-                                    size_mb = size_kb / 1024
-
-                                    print(f"Line count: {line_count}")
-                                    if size_kb < 1024:
-                                        print(f"Size: {size_kb:.2f} KB")
-                                    else:
-                                        print(f"Size: {size_mb:.2f} MB")
-
-                                    # Show preview
-                                    preview_lines = all_lines[:5]
-                                    preview = "\n".join(preview_lines)
-                                    print(
-                                        f"Content preview (first 5 lines):\n{preview}"
-                                    )
-                                    if len(all_lines) > 5:
-                                        print("...")
 
                     # Get user decision for this item. Ctrl+C / EOF here is
                     # treated as "reject remaining" (matches Codex's modal
@@ -964,7 +808,7 @@ async def _handle_slash_command(
             config,
             session,
             console,
-            resolve_hf_token(),
+            resolve_token(),
         )
         return None
 
@@ -1030,108 +874,8 @@ async def _handle_slash_command(
 
 
 async def _handle_share_traces_command(arg: str, config, session) -> None:
-    """Show or flip visibility of the user's personal trace dataset.
-
-    Uses the user's own HF_TOKEN (write-scoped to their namespace). Only
-    operates on the personal trace repo configured via
-    ``personal_trace_repo_template`` — never touches the shared org dataset.
-    """
-    from huggingface_hub import HfApi
-    from huggingface_hub.utils import HfHubHTTPError
-
     console = get_console()
-    if session is None:
-        console.print("[bold red]No active session.[/bold red]")
-        return
-
-    repo_id = session._personal_trace_repo_id() if session is not None else None
-    if not repo_id:
-        if not getattr(config, "share_traces", False):
-            console.print(
-                "[yellow]share_traces is disabled in config. "
-                "Set it to true to publish per-session traces to your HF dataset."
-                "[/yellow]"
-            )
-            return
-        if not session.user_id:
-            console.print(
-                "[yellow]No HF username resolved \u2014 cannot pick a personal "
-                "trace repo. Set HF_TOKEN to a token tied to your account.[/yellow]"
-            )
-            return
-        console.print(
-            "[yellow]personal_trace_repo_template is unset \u2014 nothing to do.[/yellow]"
-        )
-        return
-
-    token = session.hf_token or resolve_hf_token()
-    if not token:
-        console.print(
-            "[bold red]No HF_TOKEN available.[/bold red] Cannot read or change "
-            "dataset visibility."
-        )
-        return
-
-    api = HfApi(token=token)
-    url = f"https://platformops.co/datasets/{repo_id}"
-    target = arg.strip().lower()
-
-    if not target:
-        try:
-            info = await asyncio.to_thread(
-                api.repo_info, repo_id=repo_id, repo_type="dataset"
-            )
-            visibility = "private" if getattr(info, "private", False) else "public"
-            console.print(f"[bold]Trace dataset:[/bold] {url}")
-            console.print(f"[bold]Visibility:[/bold] {visibility}")
-            console.print(
-                "[dim]Use '/share-traces public' to publish, "
-                "'/share-traces private' to lock it back down.[/dim]"
-            )
-        except HfHubHTTPError as e:
-            if getattr(e.response, "status_code", None) == 404:
-                console.print(
-                    f"[dim]Dataset {repo_id} doesn't exist yet \u2014 it'll be "
-                    "created (private) on the next session save.[/dim]"
-                )
-            else:
-                console.print(f"[bold red]Hub error:[/bold red] {e}")
-        except Exception as e:
-            console.print(f"[bold red]Could not fetch dataset info:[/bold red] {e}")
-        return
-
-    if target not in {"public", "private"}:
-        console.print(
-            f"[bold red]Unknown argument:[/bold red] {target}. "
-            "Expected 'public' or 'private'."
-        )
-        return
-
-    private = target == "private"
-    try:
-        # Idempotent — create if missing so first-flip works even before any
-        # session has been saved yet.
-        await asyncio.to_thread(
-            api.create_repo,
-            repo_id=repo_id,
-            repo_type="dataset",
-            private=private,
-            token=token,
-            exist_ok=True,
-        )
-        await asyncio.to_thread(
-            api.update_repo_settings,
-            repo_id=repo_id,
-            repo_type="dataset",
-            private=private,
-            token=token,
-        )
-    except Exception as e:
-        console.print(f"[bold red]Failed to update visibility:[/bold red] {e}")
-        return
-
-    label = "PUBLIC" if not private else "private"
-    console.print(f"[green]Dataset is now {label}.[/green] {url}")
+    console.print("[dim]Trace sharing is no longer available.[/dim]")
 
 
 async def main(model: str | None = None, sandbox_tools: bool = False):
@@ -1150,22 +894,16 @@ async def main(model: str | None = None, sandbox_tools: bool = False):
     _apply_tool_runtime_override(config, sandbox_tools=sandbox_tools)
     local_mode = _is_local_tool_runtime(config)
 
-    hf_token = resolve_hf_token()
+    hf_token = resolve_token()
 
-    # Resolve username and plan from one whoami-v2 request for banner and CTAs.
-    hf_user, hf_user_plan = await _get_hf_identity(hf_token)
+    # Resolve username for banner.
+    user, _ = await _get_user_identity(hf_token)
 
     print_banner(
         model=config.model_name,
-        hf_user=hf_user,
+        user=user,
         tool_runtime=_tool_runtime_label(local_mode),
     )
-
-    # Pre-warm the HF router catalog in the background so /model switches
-    # don't block on a network fetch.
-    from agent.core import hf_router_catalog
-
-    asyncio.create_task(asyncio.to_thread(hf_router_catalog.prewarm))
 
     # Create queues for communication
     submission_queue = asyncio.Queue()
@@ -1194,9 +932,7 @@ async def main(model: str | None = None, sandbox_tools: bool = False):
             tool_router=tool_router,
             session_holder=session_holder,
             hf_token=hf_token,
-            user_id=hf_user,
-            hf_username=hf_user,
-            user_plan=hf_user_plan,
+            user_id=user,
             local_mode=local_mode,
             autonomous_mode=False,
             stream=True,
@@ -1402,13 +1138,13 @@ async def headless_main(
     _apply_tool_runtime_override(config, sandbox_tools=sandbox_tools)
     local_mode = _is_local_tool_runtime(config)
 
-    hf_token = resolve_hf_token()
+    hf_token = resolve_token()
     if hf_token:
-        print("HF token loaded", file=sys.stderr)
+        print("Token loaded", file=sys.stderr)
 
     notification_gateway = NotificationGateway(config.messaging)
     await notification_gateway.start()
-    hf_user, hf_user_plan = await _get_hf_identity(hf_token)
+    user, _ = await _get_user_identity(hf_token)
 
     if max_iterations is not None:
         config.max_iterations = max_iterations
@@ -1435,9 +1171,7 @@ async def headless_main(
             tool_router=tool_router,
             session_holder=session_holder,
             hf_token=hf_token,
-            user_id=hf_user,
-            hf_username=hf_user,
-            user_plan=hf_user_plan,
+            user_id=user,
             local_mode=local_mode,
             autonomous_mode=True,
             stream=stream,
@@ -1543,12 +1277,8 @@ async def headless_main(
             approvals = [
                 {
                     "tool_call_id": t.get("tool_call_id", ""),
-                    "approved": not _is_scheduled_hf_job_tool(t),
-                    "feedback": (
-                        "Scheduled HF jobs require manual approval."
-                        if _is_scheduled_hf_job_tool(t)
-                        else None
-                    ),
+                    "approved": True,
+                    "feedback": None,
                 }
                 for t in tools_data
             ]

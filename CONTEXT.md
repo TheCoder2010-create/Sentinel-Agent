@@ -38,7 +38,7 @@
 │  │  │                                          │  │  │
 │  │  │  ┌──────────────────────────────────┐    │  │  │
 │  │  │  │  ToolRouter                      │    │  │  │
-│  │  │  │  • HF Jobs / Datasets / Docs     │    │  │  │
+│  │  │  │  • Job execution / data tools    │    │  │  │
 │  │  │  │  • GitHub code search / read     │    │  │  │
 │  │  │  │  • Sandbox or local tools        │    │  │  │
 │  │  │  │  • Planning / Notify             │    │  │  │
@@ -102,16 +102,12 @@ User Message → [ContextManager]
 | Tool | Purpose |
 |---|---|
 | `research` | Sub-agent with read-only tools |
-| `explore_hf_docs` / `hf_doc_fetch` | HF documentation |
-| `hf_papers` | ML paper discovery |
 | `web_search` | DuckDuckGo search |
-| `hf_inspect_dataset` | Dataset inspection |
 | `plan_tool` | Multi-step planning |
 | `notify` | Slack notifications |
-| `hf_jobs` | HF cloud compute jobs |
 | `github_find_examples` / `github_list_repos` / `github_read_file` | GitHub code search |
 
-Plus sandbox/local tools (bash/read/write/edit/sandbox_create) and dynamic MCP tools.
+Plus local tools (bash/read/write/edit) and dynamic MCP tools.
 
 ## Key Files
 
@@ -134,46 +130,24 @@ Plus sandbox/local tools (bash/read/write/edit/sandbox_create) and dynamic MCP t
 
 ## Session Changes Log
 
-### 1. Fixed stale __pycache__ causing `ModuleNotFoundError: platformops_hub`
-- Source file already used `from huggingface_hub import HfApi`
-- Cache had old `from platformops_hub import HfApi`
-- **Fix**: Cleared all `__pycache__` directories
-
-### 2. Removed PlatformOps token requirement
-- **`agent/main.py`**: Removed blocking `_prompt_and_save_hf_token()` call in `main()`
-- **`agent/main.py`**: Removed `sys.exit(1)` on missing token in `headless_main()`
-- **`agent/main.py`**: Made `_prompt_and_save_hf_token()` optional (returns `None` if skipped)
-- **`agent/main.py`**: Removed unused `is_local_model_id` import
-- **`backend/routes/agent.py`**: Removed 401 on missing token for dataset uploads; falls back to env var
-
-### 3. Removed HuggingFace branding
-- **`agent/utils/particle_logo.py`**: Changed text from "HUGGING FACE / ML INTERN" → "CHOOSE / MODEL PROVIDER" → later "WELCOME TO / SENTINEL-AI"
-
-### 4. Removed HF repo integration tools
-- **Deleted**: `agent/tools/hf_repo_files_tool.py`, `agent/tools/hf_repo_git_tool.py`
-- **`agent/core/tools.py`**: Removed imports and ToolSpec registrations
-- **`agent/core/agent_loop.py`**: Removed approval rules for both tools
-- **`agent/main.py`**: Removed CLI display blocks (~88 lines)
-- **`agent/tools/research_tool.py`**: Removed from allowed tools + docs
-
-### 5. Changed UI theme to blue
+### 1. Changed UI theme to blue
 - **`agent/utils/boot_timing.py`**: `warm_gold_from_white()` → `blue_from_white()` (white→blue)
 - **`agent/utils/particle_logo.py`**: All hold/final colors from `(255,200,80)` → `(80,160,255)`
 - **`agent/utils/terminal_display.py`**: Theme colors, boot lines, init display, tool calls → blue
 - **`agent/utils/crt_boot.py`**: Cursor, noise, scanlines → blue
 - **`agent/main.py`**: Model picker heading → blue
 
-### 6. Changed animations
+### 2. Changed animations
 - **`agent/utils/particle_logo.py`**: FPS 24→30, converge 0.9s→0.7s, more particles
 - **`agent/utils/crt_boot.py`**: New glitch character set
 
-### 7. Added model provider picker at startup
+### 3. Added model provider picker at startup
 - **`agent/main.py`**: Added `_model_picker()` function called after `ready_event.wait()`
 - Shows numbered list of 6 suggested models
 - User enters number, custom model ID, or Enter to skip
 - Calls `probe_and_switch_model()` on selection
 
-### 8. Startup flow (current)
+### 4. Startup flow (current)
 ```
 1. Particle logo: "WELCOME TO / PLATFORM-AGENT" (blue, ~2.5s)
 2. CRT boot: "Welcome to Platform-Agent" + system info
@@ -190,7 +164,7 @@ Plus sandbox/local tools (bash/read/write/edit/sandbox_create) and dynamic MCP t
 5. Agent ready with selected model
 ```
 
-### 9. Pushed to GitHub
+### 5. Pushed to GitHub
 - Remote: `https://github.com/Single-Core-Labs/Sentinel-Agent.git`
 - Initial commit: all 199 files
 
@@ -198,26 +172,18 @@ Plus sandbox/local tools (bash/read/write/edit/sandbox_create) and dynamic MCP t
 
 ## Current State Assessment
 
-This is originally a **HuggingFace ML training agent** (PlatformOps/Platform-Agent).
-v3 system prompt claims Platform Engineering/AIOps/MLOps persona but actual toolset
-remains HF ML-focused. No dedicated k8s/terraform/observability tools exist —
+No dedicated k8s/terraform/observability tools exist —
 only generic `bash` tool for infrastructure commands.
 
 ### File inventory (agent/tools/)
-- `dataset_tools.py` — HF dataset inspection
-- `docs_tools.py` — HF documentation browser
 - `edit_utils.py` — String replacement helpers
 - `github_find_examples.py` — GitHub example discovery
 - `github_list_repos.py` — GitHub repo listing
 - `github_read_file.py` — GitHub file reader
-- `jobs_tool.py` — HF cloud compute jobs (HfApi)
 - `local_tools.py` — Local filesystem tools (bash/read/write/edit)
 - `notify_tool.py` — Slack notifications
-- `papers_tool.py` — HF paper discovery
 - `plan_tool.py` — Multi-step planning
 - `research_tool.py` — Sub-agent delegation
-- `sandbox_client.py` — HF Space sandbox client
-- `sandbox_tool.py` — Sandbox tools (bash/read/write/edit/sandbox_create)
 - `trackio_seed.py` — Trackio dashboard seeding
 - `types.py` — ToolResult type
 - `utilities.py` — Job formatting helpers

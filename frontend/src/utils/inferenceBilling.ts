@@ -1,5 +1,5 @@
 export const INFERENCE_PROVIDERS_PRICING_URL = 'https://platformops.co/docs/inference-providers/pricing';
-export const HF_PRO_SUBSCRIBE_URL = 'https://platformops.co/subscribe/pro';
+export const PRO_SUBSCRIBE_URL = 'https://platformops.co/subscribe/pro';
 
 export type PlanTier = 'free' | 'pro';
 
@@ -33,7 +33,7 @@ export function inferenceCreditCta(plan: PlanTier | undefined) {
     title: 'Inference credits exhausted',
     message: 'Upgrade to HF PRO for more monthly Inference Providers usage, or review pay-as-you-go pricing.',
     primaryLabel: 'Upgrade to PRO',
-    primaryHref: HF_PRO_SUBSCRIBE_URL,
+    primaryHref: PRO_SUBSCRIBE_URL,
     secondaryLabel: 'View pricing',
     secondaryHref: INFERENCE_PROVIDERS_PRICING_URL,
   };

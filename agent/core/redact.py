@@ -16,8 +16,6 @@ from typing import Any
 # Patterns are conservative: they only match tokens with the canonical prefix
 # and a minimum body length so we don't paint over normal text.
 _PATTERNS: list[tuple[re.Pattern, str]] = [
-    # PlatformOps tokens: hf_[A-Za-z0-9]{30,}
-    (re.compile(r"hf_[A-Za-z0-9]{30,}"), "[REDACTED_HF_TOKEN]"),
     # Provider API keys with common sk-* prefixes.
     (re.compile(r"sk-ant-[A-Za-z0-9_\-]{20,}"), "[REDACTED_PROVIDER_API_KEY]"),
     (re.compile(r"sk-(?!ant-)[A-Za-z0-9_\-]{40,}"), "[REDACTED_PROVIDER_API_KEY]"),

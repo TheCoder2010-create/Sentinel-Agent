@@ -13,16 +13,6 @@ from fastmcp.exceptions import ToolError
 from mcp.types import EmbeddedResource, ImageContent, TextContent
 
 from agent.config import MCPServerConfig
-from agent.tools.dataset_tools import (
-    HF_INSPECT_DATASET_TOOL_SPEC,
-    hf_inspect_dataset_handler,
-)
-from agent.tools.docs_tools import (
-    EXPLORE_HF_DOCS_TOOL_SPEC,
-    HF_DOCS_FETCH_TOOL_SPEC,
-    explore_hf_docs_handler,
-    hf_docs_fetch_handler,
-)
 from agent.tools.github_find_examples import (
     GITHUB_FIND_EXAMPLES_TOOL_SPEC,
     github_find_examples_handler,
@@ -35,12 +25,9 @@ from agent.tools.github_read_file import (
     GITHUB_READ_FILE_TOOL_SPEC,
     github_read_file_handler,
 )
-from agent.tools.jobs_tool import HF_JOBS_TOOL_SPEC, hf_jobs_handler
 from agent.tools.notify_tool import NOTIFY_TOOL_SPEC, notify_handler
-from agent.tools.papers_tool import HF_PAPERS_TOOL_SPEC, hf_papers_handler
 from agent.tools.plan_tool import PLAN_TOOL_SPEC, plan_tool_handler
 from agent.tools.research_tool import RESEARCH_TOOL_SPEC, research_handler
-from agent.tools.sandbox_tool import get_sandbox_tools
 from agent.tools.web_search_tool import WEB_SEARCH_TOOL_SPEC, web_search_handler
 
 # Suppress aiohttp deprecation warning
@@ -50,7 +37,7 @@ warnings.filterwarnings(
 
 logger = logging.getLogger(__name__)
 
-NOT_ALLOWED_TOOL_NAMES = ["hf_jobs", "hf_doc_search", "hf_doc_fetch", "hf_whoami"]
+NOT_ALLOWED_TOOL_NAMES: list[str] = []
 
 
 def convert_mcp_content_to_string(content: list) -> str:
@@ -287,38 +274,11 @@ def create_builtin_tools(local_mode: bool = False) -> list[ToolSpec]:
             parameters=RESEARCH_TOOL_SPEC["parameters"],
             handler=research_handler,
         ),
-        # Documentation search tools
-        ToolSpec(
-            name=EXPLORE_HF_DOCS_TOOL_SPEC["name"],
-            description=EXPLORE_HF_DOCS_TOOL_SPEC["description"],
-            parameters=EXPLORE_HF_DOCS_TOOL_SPEC["parameters"],
-            handler=explore_hf_docs_handler,
-        ),
-        ToolSpec(
-            name=HF_DOCS_FETCH_TOOL_SPEC["name"],
-            description=HF_DOCS_FETCH_TOOL_SPEC["description"],
-            parameters=HF_DOCS_FETCH_TOOL_SPEC["parameters"],
-            handler=hf_docs_fetch_handler,
-        ),
-        # Paper discovery and reading
-        ToolSpec(
-            name=HF_PAPERS_TOOL_SPEC["name"],
-            description=HF_PAPERS_TOOL_SPEC["description"],
-            parameters=HF_PAPERS_TOOL_SPEC["parameters"],
-            handler=hf_papers_handler,
-        ),
         ToolSpec(
             name=WEB_SEARCH_TOOL_SPEC["name"],
             description=WEB_SEARCH_TOOL_SPEC["description"],
             parameters=WEB_SEARCH_TOOL_SPEC["parameters"],
             handler=web_search_handler,
-        ),
-        # Dataset inspection tool (unified)
-        ToolSpec(
-            name=HF_INSPECT_DATASET_TOOL_SPEC["name"],
-            description=HF_INSPECT_DATASET_TOOL_SPEC["description"],
-            parameters=HF_INSPECT_DATASET_TOOL_SPEC["parameters"],
-            handler=hf_inspect_dataset_handler,
         ),
         # Planning and job management tools
         ToolSpec(
@@ -332,12 +292,6 @@ def create_builtin_tools(local_mode: bool = False) -> list[ToolSpec]:
             description=NOTIFY_TOOL_SPEC["description"],
             parameters=NOTIFY_TOOL_SPEC["parameters"],
             handler=notify_handler,
-        ),
-        ToolSpec(
-            name=HF_JOBS_TOOL_SPEC["name"],
-            description=HF_JOBS_TOOL_SPEC["description"],
-            parameters=HF_JOBS_TOOL_SPEC["parameters"],
-            handler=hf_jobs_handler,
         ),
         ToolSpec(
             name=GITHUB_FIND_EXAMPLES_TOOL_SPEC["name"],
@@ -359,13 +313,11 @@ def create_builtin_tools(local_mode: bool = False) -> list[ToolSpec]:
         ),
     ]
 
-    # Sandbox or local tools (highest priority)
+    # Local tools (highest priority)
     if local_mode:
         from agent.tools.local_tools import get_local_tools
 
         tools = get_local_tools() + tools
-    else:
-        tools = get_sandbox_tools() + tools
 
     tool_names = ", ".join([t.name for t in tools])
     logger.info(f"Loaded {len(tools)} built-in tools: {tool_names}")

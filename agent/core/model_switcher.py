@@ -95,60 +95,7 @@ def _print_hf_routing_info(model_id: str, console) -> bool:
     if is_local_model_id(model_id):
         return True
 
-    from agent.core import hf_router_catalog as cat
-
-    bare, _, tag = model_id.partition(":")
-    info = cat.lookup(bare)
-    if info is None:
-        console.print(
-            f"[bold red]Warning:[/bold red] '{bare}' isn't in the HF router "
-            "catalog. Checking anyway — first call may fail."
-        )
-        suggestions = cat.fuzzy_suggest(bare)
-        if suggestions:
-            console.print(f"[dim]Did you mean: {', '.join(suggestions)}[/dim]")
         return True
-
-    live = info.live_providers
-    if not live:
-        console.print(
-            f"[bold red]Warning:[/bold red] '{bare}' has no live providers "
-            "right now. First call will likely fail."
-        )
-        return True
-
-    if tag and tag not in _ROUTING_POLICIES:
-        matched = [p for p in live if p.provider == tag]
-        if not matched:
-            names = ", ".join(p.provider for p in live)
-            console.print(
-                f"[bold red]Warning:[/bold red] provider '{tag}' doesn't serve "
-                f"'{bare}'. Live providers: {names}. Checking anyway."
-            )
-
-    if not info.any_supports_tools:
-        console.print(
-            f"[bold red]Warning:[/bold red] no provider for '{bare}' advertises "
-            "tool-call support. This agent relies on tool calls — expect errors."
-        )
-
-    if tag in _ROUTING_POLICIES:
-        policy = tag
-    elif tag:
-        policy = f"pinned to {tag}"
-    else:
-        policy = "auto (fastest)"
-    console.print(f"  [dim]routing: {policy}[/dim]")
-    for p in live:
-        price = (
-            f"${p.input_price:g}/${p.output_price:g} per M tok"
-            if p.input_price is not None and p.output_price is not None
-            else "price n/a"
-        )
-        ctx = f"{p.context_length:,} ctx" if p.context_length else "ctx n/a"
-        tools = "tools" if p.supports_tools else "no tools"
-        console.print(f"  [dim]{p.provider}: {price}, {ctx}, {tools}[/dim]")
-    return True
 
 
 def print_model_listing(config, console) -> None:
@@ -161,7 +108,7 @@ def print_model_listing(config, console) -> None:
         marker = " [dim]<-- current[/dim]" if m["id"] == current else ""
         console.print(f"  {m['id']}  [dim]({m['label']})[/dim]{marker}")
     console.print(
-        "\n[dim]Paste any HF model id (e.g. 'MiniMaxAI/MiniMax-M3:novita').\n"
+        "\n[dim]Paste any model id (e.g. 'MiniMaxAI/MiniMax-M3:novita').\n"
         "Add ':fastest', ':cheapest', ':preferred', or ':<provider>' to override routing.\n"
         "Use 'ollama/<model>', 'vllm/<model>', 'lm_studio/<model>', or "
         "'llamacpp/<model>' for local OpenAI-compatible endpoints.[/dim]"
@@ -172,7 +119,7 @@ def print_invalid_id(arg: str, console) -> None:
     console.print(f"[bold red]Invalid model id format:[/bold red] {arg}")
     console.print(
         "[dim]Expected:\n"
-        "  • <org>/<model>[:tag]    (HF router — paste from platformops.co)\n"
+        "  • <org>/<model>[:tag]\n"
         "  • ollama/<model> | vllm/<model> | lm_studio/<model> | llamacpp/<model>[/dim]"
     )
 
@@ -195,7 +142,7 @@ async def probe_and_switch_model(
     config,
     session,
     console,
-    hf_token: str | None,
+    token: str | None,
 ) -> None:
     """Validate model+effort with a 1-token ping, cache the effective effort,
     then commit the switch.
@@ -229,8 +176,6 @@ async def probe_and_switch_model(
         return
 
     preference = config.reasoning_effort
-    if not _print_hf_routing_info(model_id, console):
-        return
 
     if not preference:
         # Nothing to validate with a ping that we couldn't validate on the
@@ -243,7 +188,7 @@ async def probe_and_switch_model(
 
     console.print(f"[dim]checking {model_id} (effort: {preference})...[/dim]")
     try:
-        outcome = await probe_effort(model_id, preference, hf_token, session=session)
+        outcome = await probe_effort(model_id, preference, token, session=session)
     except ProbeInconclusive as e:
         _commit_switch(model_id, config, session, effective=None, cache=False)
         console.print(

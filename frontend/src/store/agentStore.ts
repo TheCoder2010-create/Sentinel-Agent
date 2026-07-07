@@ -7,7 +7,7 @@
  *  - Panel state (right panel — single-artifact pattern)
  *  - Plan state
  *  - User info / health banners
- *  - Edited scripts (for hf_jobs code editing)
+ *  - Edited scripts
  *
  * Per-session state:
  *  Each session maintains its own snapshot of processing/activity/panel/plan
@@ -131,15 +131,13 @@ interface AgentStore {
   // Edited scripts (tool_call_id -> edited content)
   editedScripts: Record<string, string>;
 
-  // Job URLs (tool_call_id -> job URL) for HF jobs
+  // Job URLs (tool_call_id -> job URL)
   jobUrls: Record<string, string>;
 
-  // Job statuses (tool_call_id -> job status) for HF jobs
+  // Job statuses (tool_call_id -> job status)
   jobStatuses: Record<string, string>;
 
   // Trackio dashboard config per tool call (tool_call_id -> {spaceId, project?})
-  // Set by hf_jobs / sandbox_create tools when the agent declares trackio_space_id;
-  // the UI uses it to embed the live dashboard via an iframe.
   trackioDashboards: Record<string, { spaceId: string; project?: string }>;
 
   // Tool error states (tool_call_id -> true if errored) - persisted across renders

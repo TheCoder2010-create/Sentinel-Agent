@@ -1,7 +1,7 @@
 """All agent observability in one module.
 
-Every telemetry signal the agent emits — LLM-call usage / cost, hf_jobs
-lifecycle, sandbox lifecycle, user feedback, mid-turn heartbeat saves — is
+Every telemetry signal the agent emits — LLM-call usage / cost, sandbox
+lifecycle, user feedback, mid-turn heartbeat saves — is
 defined here so business-logic files stay free of instrumentation noise.
 
 Callsites are one-liners::
@@ -20,8 +20,6 @@ import asyncio
 import logging
 import time
 from typing import Any
-
-from agent.core.cost_estimation import hf_jobs_price_catalog
 
 logger = logging.getLogger(__name__)
 
@@ -135,100 +133,6 @@ async def record_llm_call(
     except Exception as e:
         logger.debug("record_llm_call failed (non-fatal): %s", e)
     return {"cost_usd": cost_usd, **usage}
-
-
-# ── hf_jobs ────────────────────────────────────────────────────────────────
-
-
-def _infer_push_to_hub(script_or_cmd: Any) -> bool:
-    if not isinstance(script_or_cmd, str):
-        return False
-    return (
-        "push_to_hub=True" in script_or_cmd
-        or "push_to_hub=true" in script_or_cmd
-        or "hub_model_id" in script_or_cmd
-    )
-
-
-async def record_hf_job_submit(
-    session: Any,
-    job: Any,
-    args: dict,
-    *,
-    image: str,
-    job_type: str,
-) -> float:
-    """Emit ``hf_job_submit``. Returns the monotonic start timestamp so the
-    caller can pass it back into :func:`record_hf_job_complete`."""
-    from agent.core.session import Event
-
-    t_start = time.monotonic()
-    try:
-        script_text = args.get("script") or args.get("command") or ""
-        await session.send_event(
-            Event(
-                event_type="hf_job_submit",
-                data={
-                    "job_id": getattr(job, "id", None),
-                    "job_url": getattr(job, "url", None),
-                    "flavor": args.get("hardware_flavor", "cpu-basic"),
-                    "timeout": args.get("timeout", "30m"),
-                    "job_type": job_type,
-                    "image": image,
-                    "namespace": args.get("namespace"),
-                    "push_to_hub": _infer_push_to_hub(script_text),
-                },
-            )
-        )
-    except Exception as e:
-        logger.debug("record_hf_job_submit failed (non-fatal): %s", e)
-    return t_start
-
-
-async def record_hf_job_complete(
-    session: Any,
-    job: Any,
-    *,
-    flavor: str,
-    final_status: str,
-    submit_ts: float,
-) -> dict:
-    from agent.core.session import Event
-
-    try:
-        wall_time_s = int(time.monotonic() - submit_ts)
-        billable_seconds = max(0, wall_time_s)
-        price_usd_per_hour = None
-        estimated_cost_usd = None
-        cost_estimate_source = "unknown_price"
-        prices = await hf_jobs_price_catalog()
-        if flavor in prices:
-            price_usd_per_hour = float(prices[flavor])
-            estimated_cost_usd = round(
-                price_usd_per_hour * (billable_seconds / 3600),
-                4,
-            )
-            cost_estimate_source = "runtime_price_catalog"
-        payload = {
-            "job_id": getattr(job, "id", None),
-            "flavor": flavor,
-            "final_status": final_status,
-            "wall_time_s": wall_time_s,
-            "billable_seconds_estimate": billable_seconds,
-            "price_usd_per_hour": price_usd_per_hour,
-            "estimated_cost_usd": estimated_cost_usd,
-            "cost_estimate_source": cost_estimate_source,
-        }
-        await session.send_event(
-            Event(
-                event_type="hf_job_complete",
-                data=payload,
-            )
-        )
-        return payload
-    except Exception as e:
-        logger.debug("record_hf_job_complete failed (non-fatal): %s", e)
-    return {}
 
 
 # ── sandbox ─────────────────────────────────────────────────────────────────
@@ -367,26 +271,7 @@ async def record_pro_conversion(
         logger.debug("record_pro_conversion failed (non-fatal): %s", e)
 
 
-async def record_credits_topped_up(
-    session: Any,
-    *,
-    namespace: str | None = None,
-) -> None:
-    """Emit a ``credits_topped_up`` event when an hf_job submits successfully
-    in a session that previously hit ``jobs_access_blocked`` — i.e. the user
-    came back from the HF billing top-up flow and unblocked themselves.
-    Caller is responsible for firing this at most once per session."""
-    from agent.core.session import Event
 
-    try:
-        await session.send_event(
-            Event(
-                event_type="credits_topped_up",
-                data={"namespace": namespace},
-            )
-        )
-    except Exception as e:
-        logger.debug("record_credits_topped_up failed (non-fatal): %s", e)
 
 
 # ── heartbeat ──────────────────────────────────────────────────────────────

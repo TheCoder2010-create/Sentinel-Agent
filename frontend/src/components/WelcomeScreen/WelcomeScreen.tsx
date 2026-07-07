@@ -14,9 +14,7 @@ import { useSessionStore } from '@/store/sessionStore';
 import { useAgentStore } from '@/store/agentStore';
 import { useUsageStore } from '@/store/usageStore';
 import { apiFetch } from '@/utils/api';
-import { isInIframe, triggerLogin } from '@/hooks/useAuth';
-
-const HF_ORANGE = '#FF9D00';
+import { triggerLogin } from '@/hooks/useAuth';
 
 // ---------------------------------------------------------------------------
 // ChecklistStep sub-component
@@ -53,9 +51,9 @@ function StepIndicator({ status, stepNumber }: { status: StepStatus; stepNumber:
         justifyContent: 'center',
         fontSize: '0.8rem',
         fontWeight: 700,
-        ...(status === 'active'
-          ? { bgcolor: HF_ORANGE, color: '#000' }
-          : { bgcolor: 'transparent', border: '2px solid var(--border)', color: 'var(--muted-text)' }),
+          ...(status === 'active'
+            ? { bgcolor: 'var(--accent-yellow)', color: '#000' }
+            : { bgcolor: 'transparent', border: '2px solid var(--border)', color: 'var(--muted-text)' }),
       }}
     >
       {stepNumber}
@@ -87,7 +85,7 @@ function ChecklistStep({
     textDecoration: 'none',
     ...(status === 'active'
       ? {
-          bgcolor: HF_ORANGE,
+          bgcolor: 'var(--accent-yellow)',
           color: '#000',
           boxShadow: '0 2px 12px rgba(255, 157, 0, 0.25)',
           '&:hover': { bgcolor: '#FFB340', boxShadow: '0 4px 20px rgba(255, 157, 0, 0.4)' },
@@ -112,7 +110,7 @@ function ChecklistStep({
           status === 'completed'
             ? 'var(--accent-green)'
             : status === 'active'
-              ? HF_ORANGE
+              ? 'var(--accent-yellow)'
               : 'transparent',
         ...(!isLast && { borderBottom: '1px solid var(--border)' }),
         opacity: status === 'locked' ? 0.55 : 1,
@@ -226,14 +224,6 @@ export default function WelcomeScreen() {
   const signInStatus: StepStatus = isAuthenticated ? 'completed' : 'active';
   const startStatus: StepStatus = isAuthenticated ? 'active' : 'locked';
 
-  // Space URL for iframe "Open Sentinel-AI" step
-  const spaceHost =
-    typeof window !== 'undefined'
-      ? window.location.hostname.includes('.hf.space')
-        ? window.location.origin
-        : 'https://smolagents-sentinel-ai.hf.space'
-      : '';
-
   return (
     // Outer container scrolls; inner uses `margin: auto` so the checklist
     // centers vertically when the viewport has room and falls back to top-
@@ -326,18 +316,6 @@ export default function WelcomeScreen() {
               loading={isCreating}
               isLast
             />
-          ) : inIframe ? (
-            /* Iframe: open in a full tab */
-            <ChecklistStep
-              stepNumber={1}
-              title="Open Sentinel-AI"
-              description="Open the agent in a full browser tab to get started."
-              status="active"
-              actionLabel="Open Sentinel-AI"
-              actionIcon={<OpenInNewIcon sx={{ fontSize: 16 }} />}
-              actionHref={spaceHost}
-              isLast
-            />
           ) : (
             /* Direct access: sign in → start */
             <>
@@ -376,7 +354,7 @@ export default function WelcomeScreen() {
               mt: 3,
               maxWidth: 400,
               fontSize: '0.8rem',
-              borderColor: HF_ORANGE,
+              borderColor: 'var(--accent-yellow)',
               color: 'var(--text)',
             }}
           >
