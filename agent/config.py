@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import re
 from pathlib import Path
@@ -13,6 +14,8 @@ from pydantic import BaseModel
 
 from agent.messaging.models import MessagingConfig
 from agent.observability.config import ObservabilityConfig
+
+logger = logging.getLogger(__name__)
 
 # These two are the canonical server config types for MCP servers.
 MCPServerConfig = Union[StdioMCPServer, RemoteMCPServer]
@@ -202,6 +205,27 @@ def substitute_env_vars(obj: Any) -> Any:
     return obj
 
 
+def _drop_incomplete_mcp_servers(raw: dict) -> dict:
+    """Drop MCP server entries whose env vars resolved to empty strings."""
+    servers = raw.get("mcpServers", {})
+    if not isinstance(servers, dict):
+        return raw
+    keep = {}
+    for name, cfg in servers.items():
+        if not isinstance(cfg, dict):
+            keep[name] = cfg
+            continue
+        env = cfg.get("env", {})
+        if isinstance(env, dict) and any(v == "" for v in env.values()):
+            logger.info(
+                "Dropping MCP server %r — missing required env var(s)", name
+            )
+            continue
+        keep[name] = cfg
+    raw["mcpServers"] = keep
+    return raw
+
+
 def load_config(
     config_path: str = "config.json",
     include_user_defaults: bool = False,
@@ -223,4 +247,5 @@ def load_config(
         raw_config = apply_slack_user_defaults(raw_config)
 
     config_with_env = substitute_env_vars(raw_config)
+    config_with_env = _drop_incomplete_mcp_servers(config_with_env)
     return Config.model_validate(config_with_env)
