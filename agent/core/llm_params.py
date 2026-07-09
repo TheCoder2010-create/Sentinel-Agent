@@ -55,13 +55,20 @@ LITELLM_PROVIDER_PREFIXES: dict[str, str] = {
     "nvidia": "nvidia_nim/",
 }
 
+# Map LiteLLM provider prefix to our internal provider_id for direct auth
+LITELLM_PREFIX_TO_PROVIDER: dict[str, str] = {
+    "anthropic/": "anthropic",
+    "openai/": "openai",
+    "gemini/": "google-ai-studio",
+}
+
 
 def detect_provider_from_model_id(model_id: str) -> str | None:
     """Try to detect which provider a model id belongs to."""
-    for provider_id, prefix in LITELLM_PROVIDER_PREFIXES.items():
+    for prefix, provider_id in LITELLM_PREFIX_TO_PROVIDER.items():
         if model_id.startswith(prefix):
             return provider_id
-    # Check direct provider model IDs
+    # Check direct provider model IDs (no prefix)
     if model_id.startswith("gemini-") or model_id.startswith("models/"):
         return "google-ai-studio"
     if model_id.startswith("claude-"):
@@ -97,13 +104,19 @@ def resolve_direct_provider_params(
     if not provider_id:
         return None
 
-    litellm_prefix = DIRECT_PROVIDER_LITELLM_PREFIXES.get(provider_id)
-    if not litellm_prefix:
-        return None
-
     actual_key = api_key or resolve_direct_api_key(provider_id)
     if not actual_key:
         logger.info("No direct API key found for %s, falling through to gateway", provider_id)
+        return None
+
+    # Strip the provider prefix from model name for LiteLLM
+    for prefix in LITELLM_PREFIX_TO_PROVIDER:
+        if model_name.startswith(prefix):
+            model_name = model_name[len(prefix):]
+            break
+
+    litellm_prefix = DIRECT_PROVIDER_LITELLM_PREFIXES.get(provider_id)
+    if not litellm_prefix:
         return None
 
     base_url = DIRECT_PROVIDER_BASE_URLS.get(provider_id)
@@ -112,10 +125,7 @@ def resolve_direct_provider_params(
         "api_key": actual_key,
     }
     if base_url:
-        # For OpenAI-compatible endpoints
-        if litellm_prefix == "openai/":
-            params["api_base"] = f"{base_url}"
-        elif provider_id == "google-ai-studio":
+        if provider_id == "google-ai-studio":
             params["api_base"] = base_url
 
     logger.debug("Resolved direct provider params for %s: model=%s", provider_id, params["model"])

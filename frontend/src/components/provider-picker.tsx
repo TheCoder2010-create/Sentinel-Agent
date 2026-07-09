@@ -44,8 +44,8 @@ const STATIC_PROVIDERS: ProviderInfo[] = [
     docs_url: 'https://aistudio.google.com/apikey',
     api_key_instructions: 'Get your key at https://aistudio.google.com/apikey',
     models: [
-      { provider_id: 'google-ai-studio', model_id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', description: 'Best reasoning, large context, multimodal', tag: 'large-ctx' },
-      { provider_id: 'google-ai-studio', model_id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', description: 'Fast, cost-efficient, multimodal', tag: 'fast' },
+      { provider_id: 'google-ai-studio', model_id: 'gemini/gemini-2.5-pro', name: 'Gemini 2.5 Pro', description: 'Best reasoning, large context, multimodal', tag: 'large-ctx' },
+      { provider_id: 'google-ai-studio', model_id: 'gemini/gemini-2.5-flash', name: 'Gemini 2.5 Flash', description: 'Fast, cost-efficient, multimodal', tag: 'fast' },
     ],
   },
   {
@@ -72,16 +72,6 @@ const STATIC_PROVIDERS: ProviderInfo[] = [
     api_key_instructions: 'Get your key at https://platform.deepseek.com/api_keys',
     models: [
       { provider_id: 'deepseek', model_id: 'deepseek-chat-v4', name: 'DeepSeek V4 Chat', description: 'Open-weight, strong reasoning', tag: 'open' },
-      { provider_id: 'deepseek', model_id: 'deepseek-reasoner', name: 'DeepSeek R1', description: 'Deep reasoning model', tag: 'open' },
-    ],
-  },
-  {
-    id: 'models-dev', name: 'Models.dev', auth_type: 'api_key',
-    docs_url: 'https://models.dev',
-    api_key_instructions: 'Get your models.dev API key at https://models.dev/keys',
-    models: [
-      { provider_id: 'models-dev', model_id: 'models-dev/gpt-4o', name: 'GPT-4o (via Models.dev)', description: 'Via models.dev routing', tag: 'fast' },
-      { provider_id: 'models-dev', model_id: 'models-dev/claude-sonnet', name: 'Claude Sonnet (via Models.dev)', description: 'Via models.dev routing', tag: 'recommended' },
     ],
   },
   {
@@ -90,14 +80,6 @@ const STATIC_PROVIDERS: ProviderInfo[] = [
     api_key_instructions: 'Log in with GitHub to use your Copilot account',
     models: [
       { provider_id: 'github-copilot', model_id: 'copilot-gpt-4o', name: 'Copilot GPT-4o', description: 'GitHub Copilot hosted model', tag: 'copilot' },
-    ],
-  },
-  {
-    id: 'chatgpt-plus', name: 'ChatGPT Plus/Pro', auth_type: 'api_key',
-    docs_url: 'https://platform.openai.com/',
-    api_key_instructions: 'Use your OpenAI API key with ChatGPT Plus benefits',
-    models: [
-      { provider_id: 'chatgpt-plus', model_id: 'gpt-4o', name: 'GPT-4o (Plus tier)', description: 'ChatGPT Plus tier model', tag: 'fast' },
     ],
   },
 ];
@@ -230,6 +212,7 @@ export function ProviderPicker({ onSelect, theme }: Props) {
             );
           })}
         </Box>
+      </Box>
     );
   }
 
