@@ -3,9 +3,10 @@ import { useState, useCallback, useRef } from 'react';
 import { THEMES, type ThemeConfig } from './theme.js';
 import { MockEventEmitter, type AgentEvent, type PlanItem } from './events/mock-emitter.js';
 import { IPCEventEmitter } from './events/ipc-emitter.js';
+import { RealEventEmitter } from './events/real-emitter.js';
 import { StartupSequence } from './components/startup-sequence.js';
 import { ProviderPicker } from './components/provider-picker.js';
-import { ModelPicker, MODEL_OPTIONS, type ModelOption } from './components/model-picker.js';
+import { ModelPicker, type ModelOption } from './components/model-picker.js';
 import { ChatView, type DisplayItem } from './components/chat-view.js';
 import { StatusBar } from './components/status-bar.js';
 import { InputBar } from './components/input-bar.js';
@@ -14,6 +15,7 @@ type AppPhase = 'startup' | 'provider-picker' | 'model-picker' | 'main';
 type Mode = 'plan' | 'executing' | 'idle';
 
 const USE_MOCK = process.env['SENTINEL_MOCK'] === '1' || process.argv.includes('--mock');
+const USE_IPC  = process.env['SENTINEL_IPC'] === '1'  || process.argv.includes('--ipc');
 
 let _counter = 0;
 const uid = (prefix = 'i') => `${prefix}-${++_counter}`;
@@ -36,8 +38,8 @@ export default function App() {
 
   const theme: ThemeConfig = THEMES[themeName] ?? THEMES['dark']!;
 
-  // emitter ref — holds the live event source (mock or IPC)
-  type Emitter = MockEventEmitter | IPCEventEmitter;
+  // emitter ref — holds the live event source (mock, IPC, or direct)
+  type Emitter = MockEventEmitter | IPCEventEmitter | RealEventEmitter;
   const emitterRef    = useRef<Emitter | null>(null);
   const planRef       = useRef<PlanItem[]>([]);
   const toolMapRef    = useRef<Map<string, DisplayItem & { kind: 'tool-call' }>>(new Map());
@@ -243,7 +245,9 @@ export default function App() {
 
     const emitter: Emitter = USE_MOCK
       ? new MockEventEmitter()
-      : new IPCEventEmitter();
+      : USE_IPC
+        ? new IPCEventEmitter()
+        : new RealEventEmitter();
     emitterRef.current = emitter;
     emitter.on('event', handleEvent);
     emitter.start(selectedModel, apiKey, model?.provider);
@@ -301,7 +305,7 @@ export default function App() {
           setMode('idle');
           setTurnCount(0);
           setTokens(0);
-          startSession(model.id);
+          if (model) startSession(model.id);
           emitterRef.current?.sendCommand?.('/new');
           return;
         case '/compact':
