@@ -1,7 +1,13 @@
 import { ModelProvider, type ChatMessage, type StreamCallbacks, type ToolDef, type CompletionResult, type ToolCallData } from './provider-interface.js';
 
+const DEBUG = typeof process !== 'undefined' && (process.env['DEBUG'] === '1' || process.argv.includes('--debug'));
+
 function env(name: string): string | undefined {
   return typeof process !== 'undefined' ? process.env[name] : undefined;
+}
+
+function debugLog(...args: unknown[]) {
+  if (DEBUG) console.debug('[Anthropic]', ...args);
 }
 
 export class AnthropicProvider extends ModelProvider {
@@ -38,6 +44,7 @@ export class AnthropicProvider extends ModelProvider {
     }
 
     try {
+      debugLog('complete() POST api.anthropic.com model=%s', modelId);
       const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
@@ -74,11 +81,15 @@ export class AnthropicProvider extends ModelProvider {
         }
       }
 
+      debugLog('complete() stop_reason=%s contentLen=%d toolCalls=%d', data.stop_reason, content.length, toolCalls.length);
+
       return { content, toolCalls, finishReason: data.stop_reason ?? 'stop' };
     } catch (err: unknown) {
       if (typeof err === 'object' && err !== null && (err as DOMException).name === 'AbortError') {
+        debugLog('complete() aborted');
         return { content: '', toolCalls: [], finishReason: 'interrupted' };
       }
+      debugLog('complete() error: %s', err instanceof Error ? err.message : String(err));
       throw err;
     }
   }
@@ -95,6 +106,7 @@ export class AnthropicProvider extends ModelProvider {
     }
 
     try {
+      debugLog('stream() POST api.anthropic.com model=%s', modelId);
       const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
@@ -123,6 +135,9 @@ export class AnthropicProvider extends ModelProvider {
       const reader = response.body!.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
+      let chunksReceived = 0;
+
+      debugLog('stream() first byte received');
 
       while (true) {
         const { done, value } = await reader.read();
@@ -140,8 +155,16 @@ export class AnthropicProvider extends ModelProvider {
             const parsed = JSON.parse(raw);
             if (parsed.type === 'content_block_delta' && parsed.delta?.type === 'text_delta') {
               const text = parsed.delta.text || '';
-              if (text) callbacks.onChunk(text);
+              if (text) {
+                chunksReceived++;
+                callbacks.onChunk(text);
+              }
             } else if (parsed.type === 'message_stop') {
+              debugLog('stream() message_stop chunks=%d', chunksReceived);
+              if (chunksReceived === 0) {
+                callbacks.onError('Anthropic returned zero content chunks', 'EMPTY_STREAM');
+                return;
+              }
               callbacks.onDone();
               return;
             } else if (parsed.type === 'error') {
@@ -150,26 +173,36 @@ export class AnthropicProvider extends ModelProvider {
             } else if (parsed.type === 'message_start' && parsed.message?.content) {
               for (const block of parsed.message.content) {
                 if (block.type === 'text' && block.text) {
+                  chunksReceived++;
                   callbacks.onChunk(block.text);
                 }
               }
             } else if (parsed.type === 'content_block_start' && parsed.content_block?.type === 'text') {
               if (parsed.content_block.text) {
+                chunksReceived++;
                 callbacks.onChunk(parsed.content_block.text);
               }
             }
-          } catch {
-            // skip malformed JSON
+          } catch (err: unknown) {
+            debugLog('stream() JSON parse error: %s line="%s"', err instanceof Error ? err.message : String(err), raw.slice(0, 100));
           }
         }
+      }
+
+      debugLog('stream() connection closed chunks=%d', chunksReceived);
+      if (chunksReceived === 0) {
+        callbacks.onError('Anthropic returned zero content chunks (no message_stop)', 'EMPTY_STREAM');
+        return;
       }
       callbacks.onDone();
     } catch (err: unknown) {
       if (typeof err === 'object' && err !== null && (err as DOMException).name === 'AbortError') {
+        debugLog('stream() aborted');
         callbacks.onDone();
         return;
       }
       const message = err instanceof Error ? err.message : String(err);
+      debugLog('stream() error: %s', message);
       callbacks.onError(`Anthropic request failed: ${message}`);
     }
   }

@@ -1,5 +1,11 @@
 import { ModelProvider, type ChatMessage, type StreamCallbacks, type ToolDef, type CompletionResult, type ToolCallData } from './provider-interface.js';
 
+const DEBUG = typeof process !== 'undefined' && (process.env['DEBUG'] === '1' || process.argv.includes('--debug'));
+
+function debugLog(...args: unknown[]) {
+  if (DEBUG) console.debug('[OpenAI]', ...args);
+}
+
 export class OpenAICompatibleProvider extends ModelProvider {
   private apiKey: string | undefined;
   private baseUrl: string;
@@ -43,6 +49,7 @@ export class OpenAICompatibleProvider extends ModelProvider {
     }
 
     try {
+      debugLog('complete() POST %s/chat/completions model=%s', this.baseUrl, modelId);
       const response = await fetch(`${this.baseUrl}/chat/completions`, {
         method: 'POST',
         headers: {
@@ -75,11 +82,15 @@ export class OpenAICompatibleProvider extends ModelProvider {
         return { id: tc.id, name: tc.function.name, arguments: args };
       });
 
+      debugLog('complete() finish_reason=%s contentLen=%d toolCalls=%d', choice.finish_reason, content.length, toolCalls.length);
+
       return { content, toolCalls, finishReason: choice.finish_reason ?? 'stop' };
     } catch (err: unknown) {
       if (typeof err === 'object' && err !== null && (err as DOMException).name === 'AbortError') {
+        debugLog('complete() aborted');
         return { content: '', toolCalls: [], finishReason: 'interrupted' };
       }
+      debugLog('complete() error: %s', err instanceof Error ? err.message : String(err));
       throw err;
     }
   }
@@ -96,6 +107,7 @@ export class OpenAICompatibleProvider extends ModelProvider {
     }
 
     try {
+      debugLog('stream() POST %s/chat/completions model=%s', this.baseUrl, modelId);
       const response = await fetch(`${this.baseUrl}/chat/completions`, {
         method: 'POST',
         headers: {
@@ -122,6 +134,9 @@ export class OpenAICompatibleProvider extends ModelProvider {
       const reader = response.body!.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
+      let chunksReceived = 0;
+
+      debugLog('stream() first byte received');
 
       while (true) {
         const { done, value } = await reader.read();
@@ -136,25 +151,41 @@ export class OpenAICompatibleProvider extends ModelProvider {
           if (!trimmed || !trimmed.startsWith('data:')) continue;
           const data = trimmed.slice(5).trim();
           if (data === '[DONE]') {
+            debugLog('stream() [DONE] received chunks=%d', chunksReceived);
+            if (chunksReceived === 0) {
+              callbacks.onError(`${this.displayName} returned zero content chunks`, 'EMPTY_STREAM');
+              return;
+            }
             callbacks.onDone();
             return;
           }
           try {
             const parsed = JSON.parse(data);
             const text = parsed.choices?.[0]?.delta?.content || '';
-            if (text) callbacks.onChunk(text);
-          } catch {
-            // skip malformed JSON lines
+            if (text) {
+              chunksReceived++;
+              callbacks.onChunk(text);
+            }
+          } catch (err: unknown) {
+            debugLog('stream() JSON parse error: %s line="%s"', err instanceof Error ? err.message : String(err), data.slice(0, 100));
           }
         }
+      }
+
+      debugLog('stream() connection closed chunks=%d', chunksReceived);
+      if (chunksReceived === 0) {
+        callbacks.onError(`${this.displayName} returned zero content chunks (no [DONE] marker)`, 'EMPTY_STREAM');
+        return;
       }
       callbacks.onDone();
     } catch (err: unknown) {
       if (typeof err === 'object' && err !== null && (err as DOMException).name === 'AbortError') {
+        debugLog('stream() aborted chunks=%d', (this as any).chunksReceived ?? 0);
         callbacks.onDone();
         return;
       }
       const message = err instanceof Error ? err.message : String(err);
+      debugLog('stream() error: %s', message);
       callbacks.onError(`${this.displayName} request failed: ${message}`);
     }
   }

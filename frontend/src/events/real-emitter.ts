@@ -38,6 +38,12 @@ RULES:
 const PLAN_PROMPT = `Analyze the request and create a step-by-step plan to accomplish it.
 List each step as a bullet point. Be specific about what files you will read, edit, or create, and what commands you will run.`;
 
+const DEBUG = typeof process !== 'undefined' && (process.env['DEBUG'] === '1' || process.argv.includes('--debug'));
+
+function debugLog(...args: unknown[]) {
+  if (DEBUG) console.debug('[RE]', ...args);
+}
+
 export class RealEventEmitter extends EventEmitter {
   private _running = false;
   private abortController: AbortController | null = null;
@@ -58,6 +64,8 @@ export class RealEventEmitter extends EventEmitter {
     this.destructiveActionOccurred = false;
     this.approvalResolvers.clear();
 
+    debugLog('start() modelId=%s', this.modelId);
+
     this.emit('event', {
       type: 'ready',
       timestamp: Date.now(),
@@ -71,6 +79,7 @@ export class RealEventEmitter extends EventEmitter {
       this.abortController.abort();
       this.abortController = null;
     }
+    debugLog('stop()');
   }
 
   isRunning() {
@@ -79,6 +88,9 @@ export class RealEventEmitter extends EventEmitter {
 
   send(text: string) {
     if (!this._running) return;
+
+    debugLog('send() text="%s" modelId="%s"', text.slice(0, 80), this.modelId);
+
     if (!this.modelId) {
       this.emit('event', {
         type: 'error',
@@ -123,7 +135,17 @@ export class RealEventEmitter extends EventEmitter {
     }
 
     const apiModel = modelIdToApiModel(this.modelId);
-    this.runAgentLoop(provider, apiModel, signal);
+
+    this.runAgentLoop(provider, apiModel, signal).catch((err: unknown) => {
+      const message = err instanceof Error ? err.message : String(err);
+      debugLog('runAgentLoop promise rejected: %s', message);
+      this.emit('event', {
+        type: 'error',
+        data: { message },
+        timestamp: Date.now(),
+      } as AgentEvent);
+      this.abortController = null;
+    });
   }
 
   private async runAgentLoop(
@@ -142,12 +164,17 @@ export class RealEventEmitter extends EventEmitter {
       while (turnCount < maxTurns && this._running && !signal.aborted) {
         turnCount++;
 
+        debugLog('runAgentLoop turn=%d', turnCount);
+
         const response = await provider.complete(apiModel, [
           { role: 'system', content: SYSTEM_PROMPT },
           ...this.history,
         ], tools, signal);
 
         if (signal.aborted) break;
+
+        debugLog('complete() finishReason=%s toolCalls=%d contentLen=%d',
+          response.finishReason, response.toolCalls.length, response.content.length);
 
         if (response.finishReason === 'error') {
           this.emit('event', {
@@ -170,6 +197,13 @@ export class RealEventEmitter extends EventEmitter {
               timestamp: Date.now(),
             } as AgentEvent);
             this.history.push({ role: 'assistant', content });
+          } else {
+            this.emit('event', {
+              type: 'error',
+              data: { message: `No response received from provider (empty content, finishReason="${response.finishReason}")` },
+              timestamp: Date.now(),
+            } as AgentEvent);
+            break;
           }
           this.emit('event', {
             type: 'assistant_stream_end',
@@ -190,6 +224,7 @@ export class RealEventEmitter extends EventEmitter {
       } as AgentEvent);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
+      debugLog('runAgentLoop caught: %s', message);
       this.emit('event', {
         type: 'error',
         data: { message },
@@ -263,6 +298,8 @@ export class RealEventEmitter extends EventEmitter {
       }
 
       this.toolCallHistory.push({ name: tc.name, argsKey });
+
+      debugLog('processToolCalls name=%s id=%s', tc.name, tc.id);
 
       this.emit('event', {
         type: 'tool_call',
@@ -432,8 +469,9 @@ export class RealEventEmitter extends EventEmitter {
           timestamp: Date.now(),
         } as AgentEvent);
       }
-    } catch {
-      // Test feedback loop is best-effort
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      debugLog('runTestFeedbackLoop error: %s', message);
     }
   }
 
