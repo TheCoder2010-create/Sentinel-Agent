@@ -1,10 +1,18 @@
 {
-  "name": "hf-agent-frontend",
-  "private": true,
+  "name": "sentinel-ai",
   "version": "1.0.0",
   "type": "module",
   "bin": {
     "sentinel-ai": "./bin/sentinel-ai.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "preferGlobal": true,
+  "description": "Sentinel AI — platform engineering agent CLI",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Single-Core-Labs/Sentinel-Agent1.git"
   },
   "scripts": {
     "dev": "vite",
@@ -30,7 +38,8 @@
     "react-markdown": "^9.0.1",
     "react-syntax-highlighter": "^16.1.0",
     "remark-gfm": "^4.0.1",
-    "zustand": "^5.0.0"
+    "zustand": "^5.0.0",
+    "tsx": "^4.19.2"
   },
   "devDependencies": {
     "@eslint/js": "^9.13.0",
@@ -44,7 +53,6 @@
     "eslint-plugin-react-refresh": "^0.4.13",
     "globals": "^15.11.0",
     "ink-testing-library": "^4.0.0",
-    "tsx": "^4.19.2",
     "typescript": "~5.6.2",
     "typescript-eslint": "^8.10.0",
     "vite": "^5.4.10"
