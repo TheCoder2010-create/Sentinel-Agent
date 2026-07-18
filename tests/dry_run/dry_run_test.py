@@ -37,11 +37,11 @@ for name in ("LiteLLM", "LiteLLM Router", "openai", "httpx", "httpcore", "agent"
 #  1. TOKEN COMPRESSION TEST
 # =======================================================================
 
-from litellm import Message, token_counter
-from agent.context_manager.compression import CompressionEngine
+from litellm import Message, token_counter  # noqa: E402
+from agent.context_manager.compression import CompressionEngine  # noqa: E402
 
 
-from litellm.types.utils import Function as LiteLLMFunction, ChatCompletionMessageToolCall as LiteLLMToolCall
+from litellm.types.utils import Function as LiteLLMFunction, ChatCompletionMessageToolCall as LiteLLMToolCall  # noqa: E402
 
 
 def _msg(role: str, content: str = "", tool_calls: list | None = None, **kw) -> Message:
@@ -447,7 +447,7 @@ async def test_token_compression() -> dict:
 #  2. DOOM-LOOP DETECTOR TEST
 # =======================================================================
 
-from agent.core.doom_loop import (
+from agent.core.doom_loop import (  # noqa: E402
     check_for_doom_loop,
     extract_recent_tool_signatures,
     detect_identical_consecutive,

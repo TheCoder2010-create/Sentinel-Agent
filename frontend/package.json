@@ -12,7 +12,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "cli": "tsx src/index.tsx",
-    "cli:dev": "tsx watch src/index.tsx"
+    "cli:dev": "tsx watch src/index.tsx",
+    "test": "node --import tsx --test src/**/*.test.ts src/**/*.test.tsx"
   },
   "dependencies": {
     "@ai-sdk/react": "^3.0.93",
@@ -21,7 +22,9 @@
     "@mui/icons-material": "^6.1.0",
     "@mui/material": "^6.1.0",
     "ai": "^6.0.91",
+    "dotenv": "^17.4.2",
     "ink": "^5.0.1",
+    "ink-text-input": "^6.0.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-markdown": "^9.0.1",
