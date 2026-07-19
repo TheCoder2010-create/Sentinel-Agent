@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build and package the Sentinel AI binary distribution.
 
-Supports building canonical Codex packages with integrated components:
+Supports building canonical packages with integrated components:
   - Rust binary  (sentinel / sentinel.exe)
   - V8 engine    (prebuilt static lib from rusty_v8)
   - ripgrep      (rg binary for fast search)
@@ -14,9 +14,9 @@ full, debug) and platforms (linux-x86_64, macos-aarch64, windows-x86_64),
 supporting both source-built and prebuilt binaries.
 
 Usage:
-  python3 scripts/build_codex_package.py --variant full --target linux-x86_64
-  python3 scripts/build_codex_package.py build --variant minimal
-  python3 scripts/build_codex_package.py package --format tar.gz
+  python3 scripts/build_package.py --variant full --target linux-x86_64
+  python3 scripts/build_package.py build --variant minimal
+  python3 scripts/build_package.py package --format tar.gz
 """
 
 import argparse
