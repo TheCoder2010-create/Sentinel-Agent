@@ -2,6 +2,7 @@ use std::sync::Arc;
 use sentinel_app_server_protocol::rpc::JsonRpcMessage;
 use sentinel_app_server_transport::{TransportServer, TransportKind, Authenticator, TransportEvent, MessageSink};
 use sentinel_config::SentinelConfig;
+use sentinel_tools::ToolRegistry;
 use sentinel_analytics::AnalyticsPipeline;
 use crate::handler::RequestHandler;
 
@@ -16,7 +17,8 @@ impl AppServer {
     pub fn new(config: SentinelConfig) -> Self {
         let config = Arc::new(config);
         let analytics = Arc::new(AnalyticsPipeline::new());
-        let handler = Arc::new(RequestHandler::new(config.clone(), analytics.clone()));
+        let tools = Arc::new(ToolRegistry::new());
+        let handler = Arc::new(RequestHandler::new(config.clone(), analytics.clone(), tools));
 
         Self {
             _config: config,

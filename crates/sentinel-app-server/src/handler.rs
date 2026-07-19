@@ -1,23 +1,42 @@
+use std::sync::Arc;
 use serde_json::Value;
 use sentinel_app_server_protocol::rpc::{JsonRpcRequest, JsonRpcResponse, JsonRpcError};
 use sentinel_app_server_protocol::api::{self, methods};
 use sentinel_config::SentinelConfig;
+use sentinel_tools::ToolRegistry;
+use sentinel_provider::{ModelProvider, ProviderKind};
+use sentinel_provider_info::ProviderInfo;
 use sentinel_analytics::{AnalyticsPipeline, AnalyticsEvent, EventKind};
-use std::sync::Arc;
 
 pub struct RequestHandler {
     sessions: tokio::sync::Mutex<std::collections::HashMap<String, Arc<crate::session::AppSession>>>,
     config: Arc<SentinelConfig>,
     analytics: Arc<AnalyticsPipeline>,
+    tools: Arc<ToolRegistry>,
 }
 
 impl RequestHandler {
-    pub fn new(config: Arc<SentinelConfig>, analytics: Arc<AnalyticsPipeline>) -> Self {
+    pub fn new(
+        config: Arc<SentinelConfig>,
+        analytics: Arc<AnalyticsPipeline>,
+        tools: Arc<ToolRegistry>,
+    ) -> Self {
         Self {
             sessions: tokio::sync::Mutex::new(std::collections::HashMap::new()),
             config,
             analytics,
+            tools,
         }
+    }
+
+    /// Find a provider info that supports the given model ID.
+    fn find_provider_for_model(&self, model_id: &str) -> Option<ProviderInfo> {
+        for p in self.config.providers() {
+            if p.models.iter().any(|m| m.id == model_id) {
+                return Some(p.clone());
+            }
+        }
+        None
     }
 
     pub async fn handle(&self, req: JsonRpcRequest) -> JsonRpcResponse {
@@ -27,7 +46,10 @@ impl RequestHandler {
             methods::CREATE_SESSION => self.handle_create_session(req.params).await,
             methods::DESTROY_SESSION => self.handle_destroy_session(req.params).await,
             methods::CHAT => self.handle_chat(req.params).await,
-            methods::TOOLS_LIST => Ok(serde_json::json!(self.config.providers())),
+            methods::TOOLS_LIST => {
+                let tool_defs = self.tools.list();
+                Ok(serde_json::to_value(tool_defs).unwrap_or_default())
+            }
             methods::TOOLS_CALL => Err(JsonRpcError::internal_error("Not implemented")),
             methods::CONFIG_GET => self.handle_config_get(),
             methods::DIAGNOSTICS => self.handle_diagnostics().await,
@@ -55,23 +77,70 @@ impl RequestHandler {
         Ok(serde_json::json!({ "pong": true }))
     }
 
-    async fn handle_create_session(&self, _params: Option<Value>) -> Result<Value, JsonRpcError> {
-        Err(JsonRpcError::internal_error("Provider not configured for session creation"))
+    async fn handle_create_session(&self, params: Option<Value>) -> Result<Value, JsonRpcError> {
+        let p: api::CreateSessionParams = parse_params(params)?;
+        let model_id = p.model.unwrap_or_else(|| self.config.agent.default_model.clone());
+
+        // Find the provider that can serve this model
+        let provider_info = self.find_provider_for_model(&model_id)
+            .ok_or_else(|| {
+                JsonRpcError::invalid_params(format!(
+                    "No configured provider found for model '{}'. Available providers: {}",
+                    model_id,
+                    self.config.providers().iter()
+                        .flat_map(|p| p.models.iter().map(|m| m.id.as_str()))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ))
+            })?;
+
+        // Create the provider
+        let provider = ProviderKind::from_info(provider_info)
+            .map_err(|e| JsonRpcError::internal_error(format!("Failed to create provider: {}", e)))?;
+        let provider: Arc<dyn ModelProvider> = Arc::new(provider);
+
+        // Build the session
+        let session = Arc::new(crate::session::AppSession::new(
+            Some(model_id.clone()),
+            provider,
+            self.tools.clone(),
+            self.config.clone(),
+            self.analytics.clone(),
+        ));
+
+        let session_id = session.id.clone();
+        self.sessions.lock().await.insert(session_id.clone(), session);
+
+        self.analytics.emit(
+            AnalyticsEvent::new(EventKind::SessionCreated, Some(session_id.clone()))
+        );
+
+        Ok(serde_json::json!({
+            "session_id": session_id,
+            "model": model_id,
+        }))
     }
 
     async fn handle_destroy_session(&self, params: Option<Value>) -> Result<Value, JsonRpcError> {
         let p: api::CreateSessionParams = parse_params(params)?;
-        let sessions = self.sessions.lock().await;
-        let _ = sessions.get(&p.model.unwrap_or_default());
-        self.analytics.emit(AnalyticsEvent::new(EventKind::SessionEnded, None));
-        Ok(serde_json::json!({ "destroyed": true }))
+        let session_id = p.model.unwrap_or_default();
+        let mut sessions = self.sessions.lock().await;
+        sessions.remove(&session_id);
+
+        self.analytics.emit(
+            AnalyticsEvent::new(EventKind::SessionEnded, Some(session_id.clone()))
+        );
+
+        Ok(serde_json::json!({ "destroyed": true, "session_id": session_id }))
     }
 
     async fn handle_chat(&self, params: Option<Value>) -> Result<Value, JsonRpcError> {
         let p: api::ChatParams = parse_params(params)?;
         let sessions = self.sessions.lock().await;
         let session = sessions.get(&p.session_id)
-            .ok_or_else(|| JsonRpcError::invalid_params("Session not found"))?;
+            .ok_or_else(|| JsonRpcError::invalid_params(format!(
+                "Session not found: {}", p.session_id
+            )))?;
 
         self.analytics.emit(
             AnalyticsEvent::new(EventKind::MessageSent, Some(p.session_id.clone()))
@@ -96,6 +165,14 @@ impl RequestHandler {
             "max_turns": self.config.agent.max_turns,
             "max_iterations": self.config.agent.max_iterations,
             "yolo_mode": self.config.agent.yolo_mode,
+            "providers": self.config.providers().iter().map(|p| serde_json::json!({
+                "id": p.id,
+                "name": p.name,
+                "models": p.models.iter().map(|m| serde_json::json!({
+                    "id": m.id,
+                    "name": m.name,
+                })).collect::<Vec<_>>(),
+            })).collect::<Vec<_>>(),
         }))
     }
 
@@ -104,6 +181,9 @@ impl RequestHandler {
         Ok(serde_json::json!({
             "version": env!("CARGO_PKG_VERSION"),
             "active_sessions": sessions.len(),
+            "available_models": self.config.providers().iter()
+                .flat_map(|p| p.models.iter().map(|m| m.id.as_str()))
+                .collect::<Vec<_>>(),
         }))
     }
 }
