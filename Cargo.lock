@@ -568,6 +568,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "hex"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
+
+[[package]]
 name = "http"
 version = "1.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1568,10 +1574,17 @@ dependencies = [
  "async-trait",
  "colored",
  "futures",
+ "hex",
+ "reqwest",
+ "sentinel-agent-identity",
+ "sentinel-app-server",
+ "sentinel-app-server-client",
+ "sentinel-app-server-transport",
  "sentinel-config",
  "sentinel-core",
  "sentinel-mcp",
  "sentinel-provider",
+ "sentinel-sandbox",
  "sentinel-tools",
  "serde_json",
  "tokio",

@@ -3,6 +3,10 @@ name = "sentinel-cli"
 version.workspace = true
 edition.workspace = true
 
+[[bin]]
+name = "sentinel"
+path = "src/main.rs"
+
 [dependencies]
 anyhow.workspace = true
 tokio.workspace = true
@@ -18,3 +22,10 @@ sentinel-config = { path = "../sentinel-config" }
 sentinel-provider = { path = "../sentinel-provider" }
 sentinel-tools = { path = "../sentinel-tools" }
 sentinel-mcp = { path = "../sentinel-mcp" }
+sentinel-app-server = { path = "../sentinel-app-server" }
+sentinel-app-server-client = { path = "../sentinel-app-server-client" }
+sentinel-app-server-transport = { path = "../sentinel-app-server-transport" }
+sentinel-agent-identity = { path = "../sentinel-agent-identity" }
+sentinel-sandbox = { path = "../sentinel-sandbox" }
+hex.workspace = true
+reqwest.workspace = true
