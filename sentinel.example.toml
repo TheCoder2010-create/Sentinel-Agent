@@ -1,0 +1,56 @@
+[agent]
+default_model = "gpt-4o-mini"
+max_turns = 50
+max_iterations = 100
+yolo_mode = true
+verbose = false
+
+# ── Override or add providers ─────────────────────────────────────
+# Built-in providers (no config needed if env vars are set):
+#   openai     → env: OPENAI_API_KEY
+#   anthropic  → env: ANTHROPIC_API_KEY
+#   google-ai-studio → env: GOOGLE_API_KEY
+#   deepseek   → env: DEEPSEEK_API_KEY
+
+# Add a custom OpenAI-compatible provider:
+# [[providers]]
+# id = "my-local"
+# name = "Local LLM"
+# base_url = "http://localhost:11434/v1"
+# auth = { type = "none" }
+#
+# [[providers.models]]
+# id = "llama3.2"
+# name = "Llama 3.2"
+# context_window = 8192
+# supports_streaming = true
+# supports_tools = false
+
+# ── MCP Servers ───────────────────────────────────────────────────
+# MCP servers expose additional tools to the agent.
+# Each server is a process (stdio) or HTTP endpoint.
+
+# [[mcp_servers]]
+# id = "filesystem"
+# name = "Filesystem MCP"
+# [mcp_servers.transport]
+# type = "stdio"
+# command = "npx"
+# args = ["-y", "@modelcontextprotocol/server-filesystem", "."]
+
+# [[mcp_servers]]
+# id = "github"
+# name = "GitHub MCP"
+# [mcp_servers.transport]
+# type = "http"
+# url = "http://localhost:3000/mcp"
+# headers = { Authorization = "Bearer your_github_token_here" }
+
+# [[mcp_servers]]
+# id = "custom"
+# name = "Custom MCP"
+# [mcp_servers.transport]
+# type = "stdio"
+# command = "python"
+# args = ["-m", "my_mcp_server"]
+# env = { MY_VAR = "value" }

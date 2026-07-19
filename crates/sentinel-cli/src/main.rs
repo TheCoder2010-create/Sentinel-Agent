@@ -69,7 +69,24 @@ async fn main() -> anyhow::Result<()> {
         sentinel_provider::ProviderKind::from_info(provider_info)?
     );
 
-    let tools = Arc::new(sentinel_tools::ToolRegistry::new());
+    // Build tool registry with built-in tools
+    let mut tool_registry = sentinel_tools::ToolRegistry::new();
+
+    // Register MCP tools from config
+    let mcp_servers = config.mcp_servers();
+    if !mcp_servers.is_empty() {
+        println!(" {} MCP servers configured", format!("{}", mcp_servers.len()).yellow());
+        let mcp_clients: Vec<Arc<sentinel_mcp::McpClient>> = mcp_servers.iter().map(|def| {
+            Arc::new(sentinel_mcp::McpClient::new(&def.id, def.transport.clone()))
+        }).collect();
+
+        let count = sentinel_mcp::register_all_mcp_tools(&mut tool_registry, mcp_clients).await;
+        if count > 0 {
+            println!("   {} MCP tools registered", format!("{}", count).green());
+        }
+    }
+
+    let tools = Arc::new(tool_registry);
     let agent = sentinel_core::Agent::new(provider, tools, config.clone())
         .with_event_handler(Arc::new(CliEventHandler));
 
@@ -82,26 +99,29 @@ async fn main() -> anyhow::Result<()> {
     print_banner();
     println!(" Model:  {}", model_id.green().bold());
     println!(" Yolo:   {}", if config.agent.yolo_mode { "yes".green() } else { "no".yellow() });
+    println!(" Stream: {}", "yes".cyan());
     print_divider();
 
-    if config.agent.yolo_mode {
-        let result = agent.run(&mut thread, &prompt).await?;
-        match result {
-            sentinel_core::AgentOutput::Success { .. } => {}
-            sentinel_core::AgentOutput::Error { message } => {
-                eprintln!("{} {}", "Error:".red().bold(), message);
-                std::process::exit(1);
-            }
-        }
+    let approval = if config.agent.yolo_mode {
+        Box::new(sentinel_core::AutoApprovalGate) as Box<dyn sentinel_core::ApprovalGate>
     } else {
-        let approval = CliApprovalGate;
-        let result = agent.run_with_approval(&mut thread, &prompt, &approval).await?;
-        match result {
+        Box::new(CliApprovalGate) as Box<dyn sentinel_core::ApprovalGate>
+    };
+
+    // Use streaming agent loop
+    let result = agent.run_streaming(&mut thread, &prompt, approval.as_ref()).await;
+
+    match result {
+        Ok(output) => match output {
             sentinel_core::AgentOutput::Success { .. } => {}
             sentinel_core::AgentOutput::Error { message } => {
                 eprintln!("{} {}", "Error:".red().bold(), message);
                 std::process::exit(1);
             }
+        },
+        Err(e) => {
+            eprintln!("{} {}", "Error:".red().bold(), e);
+            std::process::exit(1);
         }
     }
 

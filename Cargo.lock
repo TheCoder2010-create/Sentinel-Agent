@@ -1037,6 +1037,7 @@ dependencies = [
  "futures",
  "sentinel-config",
  "sentinel-core",
+ "sentinel-mcp",
  "sentinel-provider",
  "sentinel-tools",
  "serde_json",
@@ -1051,6 +1052,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "dirs",
+ "sentinel-mcp",
  "sentinel-provider-info",
  "serde",
  "thiserror",
@@ -1096,8 +1098,10 @@ name = "sentinel-mcp"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "reqwest",
  "sentinel-protocol",
+ "sentinel-tools",
  "serde",
  "serde_json",
  "thiserror",

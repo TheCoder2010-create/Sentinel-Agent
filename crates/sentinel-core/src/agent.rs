@@ -1,5 +1,6 @@
 use std::sync::Arc;
 use std::fmt;
+use futures::StreamExt;
 use sentinel_protocol::{
     CompletionRequest, Message, ContentBlock, Role, ToolResult,
 };
@@ -182,6 +183,8 @@ impl Agent {
         }
     }
 
+    /// Run agent with streaming output for the first response.
+    /// Returns the accumulated text + tool_calls from the first LLM response.
     pub async fn run_stream(
         &self,
         thread: &mut AgentThread,
@@ -203,6 +206,171 @@ impl Agent {
         };
 
         self.provider.complete_stream(&req).await
+    }
+
+    /// Full agent loop with streaming for every LLM call.
+    /// Yields tokens through the event handler in real-time.
+    pub async fn run_streaming(
+        &self,
+        thread: &mut AgentThread,
+        user_input: &str,
+        approval: &dyn ApprovalGate,
+    ) -> AgentResult {
+        thread.status = ThreadStatus::Running;
+        thread.add_message(Message::user(user_input));
+        if !thread.context.messages().iter().any(|m| m.role == Role::System) {
+            thread.add_message(Message::system(SYSTEM_PROMPT));
+        }
+
+        loop {
+            if !thread.increment_iteration() {
+                return Ok(AgentOutput::error("Max iterations reached"));
+            }
+
+            let req = self.build_request(thread);
+            let tool_defs = self.tools.tool_defs_for_model(true);
+            let req = if let Some(tools) = tool_defs { req.with_tools(tools) } else { req };
+
+            // Stream the response
+            let mut stream = match self.provider.complete_stream(&req).await {
+                Ok(s) => s,
+                Err(e) => return Ok(AgentOutput::error(format!("LLM stream failed: {}", e))),
+            };
+
+            let mut accumulated_text = String::new();
+            let mut tool_calls: Vec<(String, String, serde_json::Value)> = Vec::new();
+
+            while let Some(chunk) = stream.next().await {
+                match chunk {
+                    Ok(stream_chunk) => {
+                        for choice in stream_chunk.choices {
+                            if let Some(text) = choice.delta.content {
+                                accumulated_text.push_str(&text);
+                            }
+                            if let Some(tcs) = choice.delta.tool_calls {
+                                for tc in tcs {
+                                    let id = tc.id.unwrap_or_default();
+                                    let name = tc.function.as_ref().and_then(|f| f.name.clone()).unwrap_or_default();
+                                    let args_str = tc.function.as_ref().and_then(|f| f.arguments.clone()).unwrap_or_default();
+                                    let args: serde_json::Value = serde_json::from_str(&args_str).unwrap_or(serde_json::Value::Null);
+                                    tool_calls.push((id, name, args));
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("Stream error: {}", e);
+                        break;
+                    }
+                }
+            }
+
+            // Check for finish reason
+            let is_tool_call = !tool_calls.is_empty();
+            let last_text = accumulated_text.clone();
+
+            let mut content = Vec::new();
+            if !accumulated_text.is_empty() {
+                content.push(ContentBlock::Text { text: accumulated_text });
+            }
+            for (id, name, args) in &tool_calls {
+                content.push(ContentBlock::ToolCall {
+                    id: id.clone(),
+                    name: name.clone(),
+                    arguments: args.clone(),
+                });
+            }
+
+            let msg = Message::new(Role::Assistant, content);
+            thread.add_message(msg);
+            self.events.handle_event(AgentEvent::Thinking { text: last_text.clone() }).await;
+
+            if !is_tool_call {
+                thread.status = ThreadStatus::Completed;
+                self.events.handle_event(AgentEvent::Completed { text: last_text.clone() }).await;
+                return Ok(AgentOutput::success(last_text));
+            }
+
+            // Execute tool calls
+            let ctx = ToolContext::new();
+            let mut tool_results = Vec::new();
+
+            for (tool_call_id, name, args) in &tool_calls {
+                self.events.handle_event(AgentEvent::ToolCall {
+                    name: name.clone(),
+                    args: args.clone(),
+                }).await;
+
+                if !thread.yolo_mode {
+                    thread.status = ThreadStatus::AwaitingApproval;
+                    let approval_req = ApprovalRequest {
+                        tool_name: name.clone(),
+                        args: args.clone(),
+                        prompt: format!("Execute {} with the given arguments?", name),
+                    };
+                    match approval.request_approval(&approval_req).await {
+                        ApprovalDecision::Approved => {}
+                        ApprovalDecision::Rejected(reason) => {
+                            tool_results.push(ToolResult {
+                                tool_call_id: tool_call_id.clone(),
+                                name: name.clone(),
+                                output: format!("User rejected: {}", reason),
+                                is_error: true,
+                            });
+                            continue;
+                        }
+                        ApprovalDecision::Modify { .. } => {
+                            tool_results.push(ToolResult {
+                                tool_call_id: tool_call_id.clone(),
+                                name: name.clone(),
+                                output: "User modified the request".into(),
+                                is_error: true,
+                            });
+                            continue;
+                        }
+                    }
+                }
+
+                let output = self.tools.execute(name, args.clone(), &ctx).await;
+                self.events.handle_event(AgentEvent::ToolResult {
+                    name: name.clone(),
+                    output: output.text.clone(),
+                    is_error: output.is_error,
+                }).await;
+                tool_results.push(ToolResult {
+                    tool_call_id: tool_call_id.clone(),
+                    name: name.clone(),
+                    output: output.text,
+                    is_error: output.is_error,
+                });
+            }
+
+            for result in &tool_results {
+                thread.add_message(Message::new(Role::Tool, vec![
+                    ContentBlock::ToolResult {
+                        tool_call_id: result.tool_call_id.clone(),
+                        content: result.output.clone(),
+                        is_error: Some(result.is_error),
+                    }
+                ]));
+            }
+
+            if !thread.increment_turn() {
+                return Ok(AgentOutput::error("Max turns reached"));
+            }
+            self.events.handle_event(AgentEvent::TurnEnd {
+                turn: thread.turn,
+                iteration: thread.iterations,
+            }).await;
+
+            if thread.is_doom_loop() {
+                return Ok(AgentOutput::error("Doom loop detected"));
+            }
+
+            if thread.context.needs_compaction() {
+                thread.context.compact();
+            }
+        }
     }
 
     fn build_request(&self, _thread: &AgentThread) -> CompletionRequest {

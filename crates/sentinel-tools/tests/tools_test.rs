@@ -1,5 +1,4 @@
 use sentinel_tools::{ToolRegistry, ToolContext};
-use std::path::PathBuf;
 
 #[tokio::test]
 async fn test_read_write_roundtrip() {

@@ -1,5 +1,6 @@
 use serde::Deserialize;
 use sentinel_provider_info::{ProviderInfo, default_providers};
+use sentinel_mcp::McpServerDef;
 use crate::error::ConfigError;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -37,6 +38,8 @@ pub struct SentinelConfig {
     pub agent: AgentSettings,
     #[serde(default)]
     pub providers: Vec<ProviderInfo>,
+    #[serde(default)]
+    pub mcp_servers: Vec<McpServerDef>,
 }
 
 impl SentinelConfig {
@@ -75,6 +78,7 @@ impl SentinelConfig {
         self.agent.yolo_mode = other.agent.yolo_mode;
         self.agent.verbose = other.agent.verbose;
         self.providers = other.providers;
+        self.mcp_servers = other.mcp_servers;
     }
 
     pub fn provider(&self, id: &str) -> Option<&ProviderInfo> {
@@ -84,6 +88,10 @@ impl SentinelConfig {
     pub fn providers(&self) -> &[ProviderInfo] {
         &self.providers
     }
+
+    pub fn mcp_servers(&self) -> &[McpServerDef] {
+        &self.mcp_servers
+    }
 }
 
 impl Default for SentinelConfig {
@@ -91,6 +99,7 @@ impl Default for SentinelConfig {
         Self {
             agent: AgentSettings::default(),
             providers: default_providers(),
+            mcp_servers: Vec::new(),
         }
     }
 }

@@ -11,5 +11,7 @@ thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 reqwest.workspace = true
+async-trait.workspace = true
 
 sentinel-protocol = { path = "../sentinel-protocol" }
+sentinel-tools = { path = "../sentinel-tools" }

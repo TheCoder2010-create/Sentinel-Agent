@@ -11,3 +11,4 @@ thiserror.workspace = true
 dirs.workspace = true
 
 sentinel-provider-info = { path = "../sentinel-provider-info" }
+sentinel-mcp = { path = "../sentinel-mcp" }
