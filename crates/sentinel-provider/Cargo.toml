@@ -1,0 +1,19 @@
+[package]
+name = "sentinel-provider"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+reqwest.workspace = true
+tokio.workspace = true
+tokio-stream = "0.1"
+tracing.workspace = true
+async-trait = "0.1"
+futures = "0.3"
+
+sentinel-protocol = { path = "../sentinel-protocol" }
+sentinel-provider-info = { path = "../sentinel-provider-info" }

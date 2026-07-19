@@ -1,0 +1,17 @@
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum ProviderError {
+    #[error("API request failed: {0}")]
+    RequestError(String),
+    #[error("API returned error: {status} - {body}")]
+    ApiError { status: u16, body: String },
+    #[error("No API key configured for provider {provider}")]
+    MissingApiKey { provider: String },
+    #[error("Provider not found: {0}")]
+    NotFound(String),
+    #[error("Stream error: {0}")]
+    StreamError(String),
+    #[error("JSON parse error: {0}")]
+    JsonError(#[from] serde_json::Error),
+}

@@ -1,0 +1,16 @@
+[package]
+name = "sentinel-cli"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+serde_json.workspace = true
+
+sentinel-core = { path = "../sentinel-core" }
+sentinel-config = { path = "../sentinel-config" }
+sentinel-provider = { path = "../sentinel-provider" }
+sentinel-tools = { path = "../sentinel-tools" }

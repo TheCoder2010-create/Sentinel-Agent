@@ -1,0 +1,13 @@
+[package]
+name = "sentinel-config"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde.workspace = true
+toml.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+dirs.workspace = true
+
+sentinel-provider-info = { path = "../sentinel-provider-info" }

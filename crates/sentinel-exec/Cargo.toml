@@ -1,0 +1,14 @@
+[package]
+name = "sentinel-exec"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+glob.workspace = true
+async-trait = "0.1"

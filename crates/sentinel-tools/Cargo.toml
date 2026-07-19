@@ -1,0 +1,16 @@
+[package]
+name = "sentinel-tools"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+async-trait = "0.1"
+reqwest.workspace = true
+glob.workspace = true
+
+sentinel-protocol = { path = "../sentinel-protocol" }
