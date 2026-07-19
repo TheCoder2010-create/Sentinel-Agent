@@ -1,8 +1,14 @@
-load(":wine_linux_x86_64.bzl", "WINE_LINUX_X86_64")
-load(":powershell_windows_x86_64.bzl", "POWERSHELL_WINDOWS_X86_64")
+load(":wine_linux_x86_64.bzl", "wine_linux_x86_64")
+load(":powershell_windows_x86_64.bzl", "powershell_windows_x86_64")
 
+def fetch_external_deps():
+    """Fetch all external dependencies managed by Bazel modules."""
+    wine_linux_x86_64()
+    powershell_windows_x86_64()
+
+# Provide a filegroup so other targets can depend on the module definitions
 filegroup(
-    name = "modules",
+    name = "module_defs",
     srcs = [
         "wine_linux_x86_64.bzl",
         "powershell_windows_x86_64.bzl",
