@@ -1,148 +1,160 @@
 use serde_json::Value;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::process::{Child, ChildStdin, ChildStdout};
+use tokio::sync::Mutex;
+use std::sync::Arc;
 use crate::transport::McpTransportConfig;
 use sentinel_protocol::ToolDef;
 
 pub struct McpClient {
     id: String,
     transport: McpTransportConfig,
+    process: Arc<Mutex<Option<McpProcess>>>,
+}
+
+struct McpProcess {
+    child: Child,
+    stdin: ChildStdin,
+    stdout: BufReader<ChildStdout>,
+    next_id: u64,
 }
 
 impl McpClient {
     pub fn new(id: impl Into<String>, transport: McpTransportConfig) -> Self {
-        Self { id: id.into(), transport }
+        Self {
+            id: id.into(),
+            transport,
+            process: Arc::new(Mutex::new(None)),
+        }
     }
 
     pub fn id(&self) -> &str { &self.id }
 
-    pub async fn list_tools(&self) -> Result<Vec<ToolDef>, McpError> {
-        match &self.transport {
-            McpTransportConfig::Stdio { command, args, .. } => {
-                let mut child = tokio::process::Command::new(command)
-                    .args(args)
-                    .stdin(std::process::Stdio::piped())
-                    .stdout(std::process::Stdio::piped())
-                    .spawn()
-                    .map_err(|e| McpError::SpawnError(e.to_string()))?;
+    async fn ensure_connected(&self) -> Result<&Arc<Mutex<Option<McpProcess>>>, McpError> {
+        let mut guard = self.process.lock().await;
+        if guard.is_none() {
+            match &self.transport {
+                McpTransportConfig::Stdio { command, args, env } => {
+                    let mut cmd = tokio::process::Command::new(command);
+                    cmd.args(args)
+                        .stdin(std::process::Stdio::piped())
+                        .stdout(std::process::Stdio::piped())
+                        .stderr(std::process::Stdio::inherit());
 
-                let request = serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "tools/list",
-                    "params": {}
-                });
+                    if let Some(env_map) = env {
+                        for (k, v) in env_map {
+                            cmd.env(k, v);
+                        }
+                    }
 
-                if let Some(stdin) = child.stdin.as_mut() {
-                    use tokio::io::AsyncWriteExt;
-                    stdin.write_all(serde_json::to_string(&request).unwrap().as_bytes()).await
-                        .map_err(|e| McpError::WriteError(e.to_string()))?;
+                    let mut child = cmd.spawn()
+                        .map_err(|e| McpError::SpawnError(format!("{}: {}", command, e)))?;
+
+                    let stdin = child.stdin.take()
+                        .ok_or(McpError::SpawnError("stdin not available".into()))?;
+                    let stdout = child.stdout.take()
+                        .ok_or(McpError::SpawnError("stdout not available".into()))?;
+
+                    *guard = Some(McpProcess {
+                        child,
+                        stdin,
+                        stdout: BufReader::new(stdout),
+                        next_id: 1,
+                    });
                 }
-
-                let output = child.wait_with_output().await
-                    .map_err(|e| McpError::ReadError(e.to_string()))?;
-
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                let tools = parse_mcp_tools_response(&stdout)?;
-                Ok(tools)
-            }
-            McpTransportConfig::Http { url, .. } => {
-                let client = reqwest::Client::new();
-                let resp = client.post(url)
-                    .json(&serde_json::json!({
-                        "jsonrpc": "2.0",
-                        "id": 1,
-                        "method": "tools/list",
-                        "params": {}
-                    }))
-                    .send()
-                    .await
-                    .map_err(|e| McpError::HttpError(e.to_string()))?;
-
-                let data: Value = resp.json().await
-                    .map_err(|e| McpError::ParseError(e.to_string()))?;
-
-                let tools = parse_mcp_tools_value(&data)?;
-                Ok(tools)
-            }
-            McpTransportConfig::WebSocket { .. } => {
-                Err(McpError::NotImplemented("WebSocket transport"))
+                _ => return Err(McpError::NotImplemented("HTTP/WS persistent connections")),
             }
         }
+        Ok(&self.process)
+    }
+
+    async fn send_request(&self, method: &str, params: Value) -> Result<Value, McpError> {
+        let proc_ref = self.ensure_connected().await?;
+        let mut guard = proc_ref.lock().await;
+        let proc = guard.as_mut().ok_or(McpError::NotConnected)?;
+
+        let id = proc.next_id;
+        proc.next_id += 1;
+
+        let request = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": method,
+            "params": params,
+        });
+
+        let mut request_bytes = serde_json::to_vec(&request)
+            .map_err(|e| McpError::WriteError(e.to_string()))?;
+        request_bytes.push(b'\n');
+
+        proc.stdin.write_all(&request_bytes).await
+            .map_err(|e| McpError::WriteError(e.to_string()))?;
+        proc.stdin.flush().await
+            .map_err(|e| McpError::WriteError(e.to_string()))?;
+
+        // Read response line-by-line until we find our id
+        let mut response_line = String::new();
+        loop {
+            response_line.clear();
+            let n = proc.stdout.read_line(&mut response_line).await
+                .map_err(|e| McpError::ReadError(e.to_string()))?;
+            if n == 0 {
+                return Err(McpError::NotConnected);
+            }
+            let response: Value = serde_json::from_str(&response_line)
+                .map_err(|e| McpError::ParseError(e.to_string()))?;
+            if response["id"].as_u64() == Some(id) {
+                if let Some(error) = response["error"].as_object() {
+                    let msg = error["message"].as_str().unwrap_or("unknown error");
+                    return Err(McpError::RemoteError(msg.to_string()));
+                }
+                return Ok(response["result"].clone());
+            }
+        }
+    }
+
+    pub async fn list_tools(&self) -> Result<Vec<ToolDef>, McpError> {
+        let result = self.send_request("tools/list", serde_json::json!({})).await?;
+
+        let tools = result["tools"].as_array()
+            .ok_or(McpError::ParseError("No tools array in response".into()))?;
+
+        tools.iter().map(|t| {
+            Ok(ToolDef {
+                name: t["name"].as_str().unwrap_or("unknown").to_string(),
+                description: t["description"].as_str().unwrap_or("").to_string(),
+                input_schema: t["inputSchema"].clone(),
+            })
+        }).collect()
     }
 
     pub async fn call_tool(&self, name: &str, args: Value) -> Result<String, McpError> {
-        match &self.transport {
-            McpTransportConfig::Stdio { command, args: cmd_args, .. } => {
-                let mut child = tokio::process::Command::new(command)
-                    .args(cmd_args)
-                    .stdin(std::process::Stdio::piped())
-                    .stdout(std::process::Stdio::piped())
-                    .spawn()
-                    .map_err(|e| McpError::SpawnError(e.to_string()))?;
+        let result = self.send_request("tools/call", serde_json::json!({
+            "name": name,
+            "arguments": args,
+        })).await?;
 
-                let request = serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": 2,
-                    "method": "tools/call",
-                    "params": { "name": name, "arguments": args }
-                });
+        let content = result["content"].as_array()
+            .and_then(|arr| arr.first())
+            .and_then(|c| c["text"].as_str())
+            .unwrap_or("");
 
-                if let Some(stdin) = child.stdin.as_mut() {
-                    use tokio::io::AsyncWriteExt;
-                    stdin.write_all(serde_json::to_string(&request).unwrap().as_bytes()).await
-                        .map_err(|e| McpError::WriteError(e.to_string()))?;
-                }
+        Ok(content.to_string())
+    }
 
-                let output = child.wait_with_output().await
-                    .map_err(|e| McpError::ReadError(e.to_string()))?;
-
-                Ok(String::from_utf8_lossy(&output.stdout).to_string())
-            }
-            McpTransportConfig::Http { url, .. } => {
-                let client = reqwest::Client::new();
-                let resp = client.post(url)
-                    .json(&serde_json::json!({
-                        "jsonrpc": "2.0",
-                        "id": 2,
-                        "method": "tools/call",
-                        "params": { "name": name, "arguments": args }
-                    }))
-                    .send()
-                    .await
-                    .map_err(|e| McpError::HttpError(e.to_string()))?;
-
-                let data: Value = resp.json().await
-                    .map_err(|e| McpError::ParseError(e.to_string()))?;
-
-                let result = data["result"]["content"][0]["text"]
-                    .as_str()
-                    .unwrap_or("")
-                    .to_string();
-                Ok(result)
-            }
-            McpTransportConfig::WebSocket { .. } => {
-                Err(McpError::NotImplemented("WebSocket transport"))
-            }
+    pub async fn close(&self) {
+        let mut guard = self.process.lock().await;
+        if let Some(mut proc) = guard.take() {
+            let _ = proc.stdin.shutdown().await;
+            let _ = proc.child.wait().await;
         }
     }
 }
 
-fn parse_mcp_tools_response(response: &str) -> Result<Vec<ToolDef>, McpError> {
-    let data: Value = serde_json::from_str(response)
-        .map_err(|e| McpError::ParseError(e.to_string()))?;
-    parse_mcp_tools_value(&data)
-}
-
-fn parse_mcp_tools_value(data: &Value) -> Result<Vec<ToolDef>, McpError> {
-    let tools = data["result"]["tools"].as_array()
-        .ok_or(McpError::ParseError("No tools array in response".into()))?;
-
-    tools.iter().map(|t| {
-        Ok(ToolDef {
-            name: t["name"].as_str().unwrap_or("unknown").to_string(),
-            description: t["description"].as_str().unwrap_or("").to_string(),
-            input_schema: t["inputSchema"].clone(),
-        })
-    }).collect()
+impl Drop for McpClient {
+    fn drop(&mut self) {
+        // Process will be cleaned up by tokio when the runtime drops
+    }
 }
 
 use thiserror::Error;
@@ -151,12 +163,14 @@ use thiserror::Error;
 pub enum McpError {
     #[error("Failed to spawn MCP server: {0}")]
     SpawnError(String),
-    #[error("Failed to write to MCP server stdin: {0}")]
+    #[error("Failed to write to MCP server: {0}")]
     WriteError(String),
     #[error("Failed to read MCP server output: {0}")]
     ReadError(String),
-    #[error("HTTP request failed: {0}")]
-    HttpError(String),
+    #[error("Not connected")]
+    NotConnected,
+    #[error("MCP server returned error: {0}")]
+    RemoteError(String),
     #[error("Failed to parse MCP response: {0}")]
     ParseError(String),
     #[error("Not implemented: {0}")]

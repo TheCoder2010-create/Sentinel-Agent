@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::fmt;
 use futures::StreamExt;
 use sentinel_protocol::{
@@ -27,6 +28,8 @@ pub struct Agent {
     tools: Arc<ToolRegistry>,
     config: Arc<SentinelConfig>,
     events: Arc<dyn EventHandler>,
+    pub total_prompt_tokens: AtomicU64,
+    pub total_completion_tokens: AtomicU64,
 }
 
 impl Agent {
@@ -35,8 +38,16 @@ impl Agent {
         tools: Arc<ToolRegistry>,
         config: Arc<SentinelConfig>,
     ) -> Self {
-        Self { provider, tools, config, events: Arc::new(NullEventHandler) }
+        Self {
+            provider, tools, config,
+            events: Arc::new(NullEventHandler),
+            total_prompt_tokens: AtomicU64::new(0),
+            total_completion_tokens: AtomicU64::new(0),
+        }
     }
+
+    pub fn prompt_tokens(&self) -> u64 { self.total_prompt_tokens.load(Ordering::Relaxed) }
+    pub fn completion_tokens(&self) -> u64 { self.total_completion_tokens.load(Ordering::Relaxed) }
 
     pub fn with_event_handler(mut self, handler: Arc<dyn EventHandler>) -> Self {
         self.events = handler;
@@ -78,6 +89,11 @@ impl Agent {
                 Ok(r) => r,
                 Err(e) => return Ok(AgentOutput::error(format!("LLM call failed: {}", e))),
             };
+
+            if let Some(ref usage) = response.usage {
+                self.total_prompt_tokens.fetch_add(usage.prompt_tokens as u64, Ordering::Relaxed);
+                self.total_completion_tokens.fetch_add(usage.completion_tokens as u64, Ordering::Relaxed);
+            }
 
             let choice = match response.choices.into_iter().next() {
                 Some(c) => c,

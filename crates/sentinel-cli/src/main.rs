@@ -19,6 +19,21 @@ async fn main() -> anyhow::Result<()> {
 
     let args: Vec<String> = std::env::args().collect();
 
+    // Handle --help and --version
+    if args.len() >= 2 {
+        match args[1].as_str() {
+            "--help" | "-h" => {
+                print_help();
+                return Ok(());
+            }
+            "--version" | "-V" => {
+                println!("Sentinel Agent v{}", env!("CARGO_PKG_VERSION"));
+                return Ok(());
+            }
+            _ => {}
+        }
+    }
+
     let config = Arc::new(sentinel_config::SentinelConfig::load()
         .unwrap_or_default());
 
@@ -28,9 +43,9 @@ async fn main() -> anyhow::Result<()> {
         config.agent.default_model.clone()
     };
 
-    let prompt = if args.len() >= 2 {
-        args[1..].join(" ")
-    } else {
+    let prompt = if args.len() >= 3 {
+        args[2..].join(" ")
+    } else if args.len() == 2 && !args[1].starts_with('-') {
         let mut input = String::new();
         eprintln!("{}", "Enter prompt (Ctrl+D to submit):".yellow());
         for line in std::io::stdin().lines() {
@@ -44,9 +59,14 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         input.trim().to_string()
+    } else {
+        String::new()
     };
 
-    if prompt.is_empty() {
+    if prompt.is_empty() && args.len() == 1 {
+        print_help();
+        return Ok(());
+    } else if prompt.is_empty() {
         eprintln!("{} sentinel [model] \"your prompt\"", "Usage:".yellow().bold());
         std::process::exit(1);
     }
@@ -115,17 +135,64 @@ async fn main() -> anyhow::Result<()> {
         Ok(output) => match output {
             sentinel_core::AgentOutput::Success { .. } => {}
             sentinel_core::AgentOutput::Error { message } => {
-                eprintln!("{} {}", "Error:".red().bold(), message);
+                print_error(&message);
                 std::process::exit(1);
             }
         },
         Err(e) => {
-            eprintln!("{} {}", "Error:".red().bold(), e);
+            print_error(&e.to_string());
             std::process::exit(1);
         }
     }
 
-    let stats = format!("(turns: {}, iterations: {})", thread.turn, thread.iterations);
-    println!("\n{} {}", "Done.".green().bold(), stats.dimmed());
+    let (prompt_tok, completion_tok) = (agent.prompt_tokens(), agent.completion_tokens());
+    let token_info = if prompt_tok > 0 || completion_tok > 0 {
+        format!("{} in, {} out", prompt_tok, completion_tok)
+    } else {
+        String::new()
+    };
+
+    let stats = format!("turns: {}, iterations: {}", thread.turn, thread.iterations);
+    let summary = if token_info.is_empty() {
+        stats
+    } else {
+        format!("{}, {} tokens", stats, token_info)
+    };
+    println!("\n{} {}", "Done.".green().bold(), summary.dimmed());
     Ok(())
+}
+
+fn print_error(msg: &str) {
+    eprintln!();
+    eprintln!(" {} {}", "✖ Error:".red().bold(), msg);
+    if msg.contains("API key") || msg.contains("401") || msg.contains("403") {
+        eprintln!("   {}", "Hint: Set the corresponding env var (see --help for provider list)".yellow());
+    } else if msg.contains("timed out") || msg.contains("timeout") {
+        eprintln!("   {}", "Hint: The request timed out. Try a smaller prompt or check your connection.".yellow());
+    } else if msg.contains("404") {
+        eprintln!("   {}", "Hint: The model may not exist or the base URL is wrong.".yellow());
+    }
+}
+
+fn print_help() {
+    println!("{}", "Usage:".yellow().bold());
+    println!("  sentinel [model] \"prompt\"");
+    println!("  sentinel [model]           (reads prompt from stdin)");
+    println!("  sentinel --help            show this help");
+    println!("  sentinel --version         show version");
+    println!();
+    println!("{}", "Examples:".yellow().bold());
+    println!("  sentinel gpt-4o-mini \"write hello world to test.txt\"");
+    println!("  sentinel claude-sonnet-4-20250514 \"explain this code\"");
+    println!("  sentinel gemini-2.5-flash < prompt.txt");
+    println!();
+    println!("{}", "Configuration:".yellow().bold());
+    println!("  See {} for available options", "sentinel.example.toml".cyan());
+    println!("  Config files: {}, {}, {}", "sentinel.toml".cyan(), "config.toml".cyan(), ".sentinel.toml".cyan());
+    println!();
+    println!("{}", "Providers (set env var):".yellow().bold());
+    println!("  OpenAI          OPENAI_API_KEY");
+    println!("  Anthropic       ANTHROPIC_API_KEY");
+    println!("  Google          GOOGLE_API_KEY");
+    println!("  DeepSeek        DEEPSEEK_API_KEY");
 }

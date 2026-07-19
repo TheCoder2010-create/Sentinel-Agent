@@ -37,11 +37,10 @@ impl Tool for ReadTool {
         })
     }
 
-    async fn execute(&self, args: serde_json::Value, _ctx: &ToolContext) -> ToolOutput {
+    async fn execute(&self, args: serde_json::Value, ctx: &ToolContext) -> ToolOutput {
         let path = args["file_path"].as_str().unwrap_or("");
-        if path.is_empty() {
-            return ToolOutput::err("file_path is required");
-        }
+        if path.is_empty() { return ToolOutput::err("file_path is required"); }
+        if let Some(err) = sandbox_check_read(ctx, path) { return err; }
         match std::fs::read_to_string(path) {
             Ok(content) => ToolOutput::ok(content),
             Err(e) => ToolOutput::err(format!("Failed to read {}: {}", path, e)),
@@ -67,12 +66,11 @@ impl Tool for WriteTool {
         })
     }
 
-    async fn execute(&self, args: serde_json::Value, _ctx: &ToolContext) -> ToolOutput {
+    async fn execute(&self, args: serde_json::Value, ctx: &ToolContext) -> ToolOutput {
         let path = args["file_path"].as_str().unwrap_or("");
         let content = args["content"].as_str().unwrap_or("");
-        if path.is_empty() {
-            return ToolOutput::err("file_path is required");
-        }
+        if path.is_empty() { return ToolOutput::err("file_path is required"); }
+        if let Some(err) = sandbox_check_write(ctx, path) { return err; }
         match std::fs::write(path, content) {
             Ok(_) => ToolOutput::ok(format!("Wrote {} bytes to {}", content.len(), path)),
             Err(e) => ToolOutput::err(format!("Failed to write {}: {}", path, e)),
@@ -100,7 +98,7 @@ impl Tool for EditTool {
         })
     }
 
-    async fn execute(&self, args: serde_json::Value, _ctx: &ToolContext) -> ToolOutput {
+    async fn execute(&self, args: serde_json::Value, ctx: &ToolContext) -> ToolOutput {
         let path = args["file_path"].as_str().unwrap_or("");
         let old = args["old_string"].as_str().unwrap_or("");
         let new = args["new_string"].as_str().unwrap_or("");
@@ -108,6 +106,9 @@ impl Tool for EditTool {
 
         if path.is_empty() { return ToolOutput::err("file_path is required"); }
         if old.is_empty() { return ToolOutput::err("old_string is required"); }
+
+        if let Some(err) = sandbox_check_read(ctx, path) { return err; }
+        if let Some(err) = sandbox_check_write(ctx, path) { return err; }
 
         let content = match std::fs::read_to_string(path) {
             Ok(c) => c,
@@ -155,10 +156,13 @@ impl Tool for GlobTool {
         })
     }
 
-    async fn execute(&self, args: serde_json::Value, _ctx: &ToolContext) -> ToolOutput {
+    async fn execute(&self, args: serde_json::Value, ctx: &ToolContext) -> ToolOutput {
         let pattern = args["pattern"].as_str().unwrap_or("");
         if pattern.is_empty() { return ToolOutput::err("pattern is required"); }
         let base_dir = args["path"].as_str().map(|p| p.to_string());
+        if let Some(ref dir) = base_dir {
+            if let Some(err) = sandbox_check_read(ctx, dir) { return err; }
+        }
         let full_pattern = match &base_dir {
             Some(dir) => format!("{}/{}", dir.trim_end_matches('/'), pattern),
             None => pattern.to_string(),
@@ -191,10 +195,11 @@ impl Tool for GrepTool {
         })
     }
 
-    async fn execute(&self, args: serde_json::Value, _ctx: &ToolContext) -> ToolOutput {
+    async fn execute(&self, args: serde_json::Value, ctx: &ToolContext) -> ToolOutput {
         let pattern = args["pattern"].as_str().unwrap_or("");
         if pattern.is_empty() { return ToolOutput::err("pattern is required"); }
         let path = args["path"].as_str().unwrap_or(".");
+        if let Some(err) = sandbox_check_read(ctx, path) { return err; }
         let include = args["include"].as_str();
 
         // Simple recursive grep without external deps
@@ -258,6 +263,7 @@ impl Tool for BashTool {
     async fn execute(&self, args: serde_json::Value, ctx: &ToolContext) -> ToolOutput {
         let command = args["command"].as_str().unwrap_or("");
         if command.is_empty() { return ToolOutput::err("command is required"); }
+        if let Some(err) = sandbox_check_exec(ctx, command) { return err; }
 
         let _timeout = args["timeout"].as_u64().unwrap_or(120_000);
         let workdir = args["workdir"].as_str()
@@ -352,8 +358,9 @@ impl Tool for GitStatusTool {
         })
     }
 
-    async fn execute(&self, args: serde_json::Value, _ctx: &ToolContext) -> ToolOutput {
+    async fn execute(&self, args: serde_json::Value, ctx: &ToolContext) -> ToolOutput {
         let path = args["path"].as_str().unwrap_or(".");
+        if let Some(err) = sandbox_check_exec(ctx, "git") { return err; }
         run_git(path, &["status", "--short"])
     }
 }
@@ -375,8 +382,9 @@ impl Tool for GitDiffTool {
         })
     }
 
-    async fn execute(&self, args: serde_json::Value, _ctx: &ToolContext) -> ToolOutput {
+    async fn execute(&self, args: serde_json::Value, ctx: &ToolContext) -> ToolOutput {
         let path = args["path"].as_str().unwrap_or(".");
+        if let Some(err) = sandbox_check_exec(ctx, "git") { return err; }
         let staged = args["staged"].as_bool().unwrap_or(false);
         if staged {
             run_git(path, &["diff", "--cached"])
@@ -404,12 +412,11 @@ impl Tool for GitCommitTool {
         })
     }
 
-    async fn execute(&self, args: serde_json::Value, _ctx: &ToolContext) -> ToolOutput {
+    async fn execute(&self, args: serde_json::Value, ctx: &ToolContext) -> ToolOutput {
         let path = args["path"].as_str().unwrap_or(".");
         let message = args["message"].as_str().unwrap_or("");
-        if message.is_empty() {
-            return ToolOutput::err("commit message is required");
-        }
+        if message.is_empty() { return ToolOutput::err("commit message is required"); }
+        if let Some(err) = sandbox_check_exec(ctx, "git") { return err; }
         run_git(path, &["commit", "-m", message])
     }
 }
@@ -431,9 +438,10 @@ impl Tool for GitLogTool {
         })
     }
 
-    async fn execute(&self, args: serde_json::Value, _ctx: &ToolContext) -> ToolOutput {
+    async fn execute(&self, args: serde_json::Value, ctx: &ToolContext) -> ToolOutput {
         let path = args["path"].as_str().unwrap_or(".");
         let max_count = args["max_count"].as_u64().unwrap_or(10);
+        if let Some(err) = sandbox_check_exec(ctx, "git") { return err; }
         run_git(path, &["log", "--oneline", &format!("-{}", max_count)])
     }
 }
@@ -461,6 +469,33 @@ fn run_git(path: &str, args: &[&str]) -> ToolOutput {
         }
         Err(e) => ToolOutput::err(format!("git command failed: {}", e)),
     }
+}
+
+fn sandbox_check_read(ctx: &ToolContext, path: &str) -> Option<ToolOutput> {
+    if let Some(ref policy) = ctx.sandbox {
+        if !policy.can_read(path) {
+            return Some(ToolOutput::err(format!("Read access denied: {}", path)));
+        }
+    }
+    None
+}
+
+fn sandbox_check_write(ctx: &ToolContext, path: &str) -> Option<ToolOutput> {
+    if let Some(ref policy) = ctx.sandbox {
+        if !policy.can_write(path) {
+            return Some(ToolOutput::err(format!("Write access denied: {}", path)));
+        }
+    }
+    None
+}
+
+fn sandbox_check_exec(ctx: &ToolContext, cmd: &str) -> Option<ToolOutput> {
+    if let Some(ref policy) = ctx.sandbox {
+        if !policy.can_execute(cmd) {
+            return Some(ToolOutput::err(format!("Execution denied: {}", cmd)));
+        }
+    }
+    None
 }
 
 fn urlencoding(s: &str) -> String {

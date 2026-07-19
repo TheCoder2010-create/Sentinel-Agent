@@ -17,5 +17,6 @@ async-trait.workspace = true
 
 sentinel-protocol = { path = "../sentinel-protocol" }
 sentinel-provider = { path = "../sentinel-provider" }
+sentinel-provider-info = { path = "../sentinel-provider-info" }
 sentinel-tools = { path = "../sentinel-tools" }
 sentinel-config = { path = "../sentinel-config" }
