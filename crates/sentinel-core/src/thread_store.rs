@@ -1,9 +1,13 @@
 use async_trait::async_trait;
+use rusqlite::{params, Connection};
+use std::sync::{Arc, Mutex};
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use crate::thread::AgentThread;
 use crate::conversation::Conversation;
 
+/// Thread persisted representation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SavedThread {
     pub id: String,
@@ -71,6 +75,7 @@ pub enum ThreadStoreError {
     Store(String),
 }
 
+// JSON file based implementation (existing)
 pub struct JsonFileThreadStore {
     dir: std::path::PathBuf,
 }
@@ -142,5 +147,144 @@ impl ThreadStore for JsonFileThreadStore {
         forked.parent_thread_id = Some(thread.id.to_string());
         self.save_thread(&forked).await?;
         Ok(forked)
+    }
+}
+
+// SQLite-backed implementation
+#[derive(Debug, Clone)]
+pub struct SqliteThreadStore {
+    conn: Arc<Mutex<Connection>>,
+}
+
+impl SqliteThreadStore {
+    /// Open or create the SQLite database at the given path.
+    pub fn new(path: impl Into<std::path::PathBuf>) -> Result<Self, ThreadStoreError> {
+        let path_buf = path.into();
+        let conn = Connection::open(&path_buf)
+            .map_err(|e| ThreadStoreError::Store(e.to_string()))?;
+        conn.execute_batch("PRAGMA journal_mode=WAL;")
+            .map_err(|e| ThreadStoreError::Store(e.to_string()))?;
+        let store = Self { conn: Arc::new(Mutex::new(conn)) };
+        store.init_tables()?;
+        Ok(store)
+    }
+
+    fn init_tables(&self) -> Result<(), ThreadStoreError> {
+        let conn = self.conn.lock()
+            .map_err(|e| ThreadStoreError::Store(e.to_string()))?;
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS threads (
+                thread_id TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                data TEXT NOT NULL,
+                schema_version INTEGER NOT NULL
+            );"
+        ).map_err(|e| ThreadStoreError::Store(e.to_string()))?;
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl ThreadStore for SqliteThreadStore {
+    async fn save_thread(&self, thread: &AgentThread) -> Result<(), ThreadStoreError> {
+        let saved: SavedThread = thread.into();
+        let json = serde_json::to_string_pretty(&saved)
+            .map_err(|e| ThreadStoreError::Serialization(e.to_string()))?;
+        let thread_id = saved.id;
+        let now = Utc::now().to_rfc3339();
+        let conn = self.conn.lock()
+            .map_err(|e| ThreadStoreError::Store(e.to_string()))?;
+        conn.execute(
+            "INSERT OR REPLACE INTO threads (thread_id, created_at, updated_at, data, schema_version) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![thread_id, now.clone(), now, json, 1usize],
+        ).map_err(|e| ThreadStoreError::Store(e.to_string()))?;
+        Ok(())
+    }
+
+    async fn load_thread(&self, thread_id: &str) -> Result<AgentThread, ThreadStoreError> {
+        let conn = self.conn.lock()
+            .map_err(|e| ThreadStoreError::Store(e.to_string()))?;
+        let mut stmt = conn.prepare("SELECT data FROM threads WHERE thread_id = ?1")
+            .map_err(|e| ThreadStoreError::Store(e.to_string()))?;
+        let mut rows = stmt.query(params![thread_id])
+            .map_err(|e| ThreadStoreError::Store(e.to_string()))?;
+        if let Some(row) = rows.next()? {
+            let data: String = row.get(0)
+                .map_err(|e| ThreadStoreError::Store(e.to_string()))?;
+            let saved: SavedThread = serde_json::from_str(&data)
+                .map_err(|e| ThreadStoreError::Serialization(e.to_string()))?;
+            Ok(saved.into_thread())
+        } else {
+            Err(ThreadStoreError::NotFound(thread_id.to_string()))
+        }
+    }
+
+    async fn list_threads(&self) -> Result<Vec<String>, ThreadStoreError> {
+        let conn = self.conn.lock()
+            .map_err(|e| ThreadStoreError::Store(e.to_string()))?;
+        let mut stmt = conn.prepare("SELECT thread_id FROM threads ORDER BY thread_id ASC")
+            .map_err(|e| ThreadStoreError::Store(e.to_string()))?;
+        let rows = stmt.query_map([], |row| row.get(0))
+            .map_err(|e| ThreadStoreError::Store(e.to_string()))?;
+        let mut ids: Vec<String> = rows
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| ThreadStoreError::Store(e.to_string()))?;
+        ids.sort();
+        Ok(ids)
+    }
+
+    async fn delete_thread(&self, thread_id: &str) -> Result<(), ThreadStoreError> {
+        let conn = self.conn.lock()
+            .map_err(|e| ThreadStoreError::Store(e.to_string()))?;
+        let rows = conn.execute("DELETE FROM threads WHERE thread_id = ?1", params![thread_id])
+            .map_err(|e| ThreadStoreError::Store(e.to_string()))?;
+        if rows == 0 {
+            Err(ThreadStoreError::NotFound(thread_id.to_string()))
+        } else {
+            Ok(())
+        }
+    }
+
+    async fn fork_thread(&self, thread_id: &str) -> Result<AgentThread, ThreadStoreError> {
+        let thread = self.load_thread(thread_id).await?;
+        let forked_conversation = thread.conversation.clone();
+        let mut forked = AgentThread::new(thread.max_turns, thread.max_iterations, thread.yolo_mode);
+        forked.conversation = forked_conversation;
+        forked.parent_thread_id = Some(thread.id.to_string());
+        self.save_thread(&forked).await?;
+        Ok(forked)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uuid::Uuid;
+
+    #[tokio::test]
+    async fn test_sqlite_thread_store_persistence() {
+        let dir = std::env::temp_dir().join(format!("sqlite_thread_store_test_{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).expect("failed to create temp dir");
+        let db_path = dir.join("threads.db");
+
+        let store1 = SqliteThreadStore::new(&db_path).expect("failed to init store");
+        let thread = AgentThread::new(10, 20, false);
+        store1.save_thread(&thread).await.expect("save failed");
+        drop(store1);
+
+        let store2 = SqliteThreadStore::new(&db_path).expect("failed to re-open store");
+        let loaded = store2.load_thread(&thread.id.to_string()).await.expect("load failed");
+
+        assert_eq!(thread.id, loaded.id);
+        assert_eq!(thread.max_turns, loaded.max_turns);
+        assert_eq!(thread.max_iterations, loaded.max_iterations);
+        assert_eq!(thread.yolo_mode, loaded.yolo_mode);
+        assert_eq!(thread.parent_thread_id, loaded.parent_thread_id);
+        assert_eq!(thread.turn, loaded.turn);
+        assert_eq!(thread.iterations, loaded.iterations);
+        assert_eq!(thread.conversation, loaded.conversation);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -20,6 +20,8 @@ pub struct AgentSettings {
 fn default_model() -> String { "gpt-4o".into() }
 fn default_true() -> bool { true }
 
+fn default_thread_store() -> String { "memory".into() }
+
 impl Default for AgentSettings {
     fn default() -> Self {
         Self {
@@ -40,6 +42,8 @@ pub struct SentinelConfig {
     pub providers: Vec<ProviderInfo>,
     #[serde(default)]
     pub mcp_servers: Vec<McpServerDef>,
+    #[serde(default = "default_thread_store")]
+    pub thread_store: String,
 }
 
 impl SentinelConfig {
@@ -79,6 +83,9 @@ impl SentinelConfig {
         self.agent.verbose = other.agent.verbose;
         self.providers = other.providers;
         self.mcp_servers = other.mcp_servers;
+        if other.thread_store != default_thread_store() {
+            self.thread_store = other.thread_store;
+        }
     }
 
     pub fn provider(&self, id: &str) -> Option<&ProviderInfo> {
@@ -100,6 +107,7 @@ impl Default for SentinelConfig {
             agent: AgentSettings::default(),
             providers: default_providers(),
             mcp_servers: Vec::new(),
+            thread_store: default_thread_store(),
         }
     }
 }
