@@ -1,7 +1,7 @@
 use anyhow::Result;
 use std::sync::Arc;
-use codex_exec::MockClient;
-use codex_exec::exec_events::ThreadEvent;
+use sentinel_ai_exec::MockClient;
+use sentinel_ai_exec::exec_events::ThreadEvent;
 use serde_json::json;
 
 /// Facade over the backend server. For now this wraps the `codex_exec::MockClient`.

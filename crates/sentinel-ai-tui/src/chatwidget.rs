@@ -1,5 +1,5 @@
 use colored::*;
-use codex_exec::exec_events::ThreadEvent;
+use sentinel_ai_exec::exec_events::ThreadEvent;
 use serde_json::Value;
 
 /// Basic chat widget that stores a history of `ThreadEvent`s.
@@ -23,7 +23,7 @@ impl ChatWidget {
         // Clear the screen (simple approach).
         print!("{}[2J", 27 as char); // ANSI escape to clear screen.
         println!("{}", "╔══════════════════════════════════╗".green());
-        println!("{}", "║          Codex TUI Session        ║".green().bold());
+        println!("{}", "║          Sentinel AI TUI Session        ║".green().bold());
         println!("{}", "╚══════════════════════════════════╝".green());
         for ev in &self.history {
             match ev.event_type.as_str() {

@@ -1,5 +1,5 @@
-use codex_exec::event_processor::{EventProcessor, HumanProcessor, JsonlProcessor};
-use codex_exec::exec_events::ThreadEvent;
+use sentinel_ai_exec::event_processor::{EventProcessor, HumanProcessor, JsonlProcessor};
+use sentinel_ai_exec::exec_events::ThreadEvent;
 use serde_json::json;
 
 #[test]

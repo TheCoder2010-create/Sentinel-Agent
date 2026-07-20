@@ -1,9 +1,9 @@
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
-/// Top‑level CLI configuration for `codex-exec`.
+/// Top‑level CLI configuration for `sentinel-ai-exec`.
 #[derive(Debug, Parser)]
-#[command(name = "codex-exec", author, version, about = "CLI front‑end for a Codex‑style AI agent")]
+#[command(name = "sentinel-ai-exec", author, version, about = "CLI front‑end for a Sentinel AI‑style agent")]
 pub struct Cli {
     /// Fail if the configuration file cannot be loaded.
     #[arg(long)]

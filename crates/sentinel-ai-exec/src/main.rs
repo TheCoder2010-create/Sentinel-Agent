@@ -1,5 +1,5 @@
 use anyhow::Result;
-use codex_exec::Cli;
+use sentinel_ai_exec::Cli;
 use clap::Parser;
 use tokio::runtime::Builder;
 

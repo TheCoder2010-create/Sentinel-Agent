@@ -1,8 +1,8 @@
-//! Minimal Codex‑style Terminal UI (TUI).
+//! Minimal Sentinel‑AI‑style Terminal UI (TUI).
 //!
 //! This crate implements a lightweight, event‑driven TUI that mirrors the
-//! architecture described in the Codex‑rs `tui` module. It uses a mock backend
-//! (`codex_exec::MockClient`) for demonstration purposes.
+//! architecture described in the Sentinel‑ai‑rs `tui` module. It uses a mock backend
+//! (`sentinel_ai_exec::MockClient`) for demonstration purposes.
 
 mod app;
 mod app_event;

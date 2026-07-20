@@ -4,7 +4,7 @@ use tokio::sync::{mpsc, Mutex};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tokio_stream::StreamExt;
 use colored::*;
-use codex_exec::MockClient;
+use sentinel_ai_exec::MockClient;
 use crate::{app_event::AppEvent, app_event_sender::AppEventSender, chatwidget::ChatWidget, app_server_session::AppServerSession};
 
 /// Central state manager for the TUI.

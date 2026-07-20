@@ -1,12 +1,12 @@
 //! Utilities for unit‑ and integration‑testing the Codex crates.
 //!
 //! The helpers are deliberately lightweight and avoid pulling in heavy runtime
-//! dependencies. They are primarily intended for the test suites in `codex‑core`,
-//! `codex‑exec`, and `codex‑tui`.
+//! dependencies. They are primarily intended for the test suites in `sentinel-ai-core`,
+//! `sentinel-ai-exec`, and `sentinel-ai-tui`.
 
 use anyhow::Result;
-use codex_exec::MockClient;
-use codex_exec::exec_events::ThreadEvent;
+use sentinel_ai_exec::MockClient;
+use sentinel_ai_exec::exec_events::ThreadEvent;
 
 
 /// Helper that returns a deterministic set of mock events.
@@ -23,7 +23,7 @@ pub fn mock_events() -> Vec<ThreadEvent> {
     ]
 }
 
-/// Convenience wrapper around the `codex_exec::MockClient` for tests.
+/// Convenience wrapper around the `sentinel_ai_exec::MockClient` for tests.
 pub fn new_mock_client() -> MockClient {
     MockClient::default()
 }

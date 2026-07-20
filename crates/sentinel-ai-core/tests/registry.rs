@@ -1,4 +1,4 @@
-use codex_core::agent::{AgentRegistry, RegistryError};
+use sentinel_ai_core::agent::{AgentRegistry, RegistryError};
 use tokio::runtime::Runtime;
 
 #[test]

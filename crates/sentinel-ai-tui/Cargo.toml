@@ -1,5 +1,5 @@
 [package]
-name = "codex-tui"
+name = "sentinel-ai-tui"
 version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
@@ -14,4 +14,4 @@ serde_json = { workspace = true }
 serde_yaml = { workspace = true }
 thiserror = { workspace = true }
 # Use the mock client from codex-exec
-codex-exec = { path = "../codex-exec" }
+sentinel-ai-exec = { path = "../sentinel-ai-exec" }

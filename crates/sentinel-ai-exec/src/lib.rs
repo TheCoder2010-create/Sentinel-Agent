@@ -1,6 +1,6 @@
-//! codex-exec – command‑line front‑end for a Codex‑style AI agent.
+//! sentinel-ai-exec – command‑line front‑end for a Sentinel AI‑style AI agent.
 //!
-//! This library contains the core logic that drives the `codex-exec` binary. It
+//! This library contains the core logic that drives the `sentinel-ai-exec` binary. It
 //! parses CLI arguments, creates an (in‑process) application‑server client, and
 //! processes the event stream emitted by the agent.
 //!

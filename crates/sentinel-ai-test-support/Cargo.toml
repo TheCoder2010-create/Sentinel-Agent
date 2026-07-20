@@ -1,5 +1,5 @@
 [package]
-name = "codex-test-support"
+name = "sentinel-ai-test-support"
 version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
@@ -11,4 +11,4 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 
 # Re‑use the mock client from codex‑exec for consistency.
-codex-exec = { path = "../codex-exec" }
+sentinel-ai-exec = { path = "../sentinel-ai-exec" }

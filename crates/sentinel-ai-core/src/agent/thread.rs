@@ -1,4 +1,4 @@
-//! Minimal thread state used by `codex-core::agent`.
+//! Minimal thread state used by `sentinel-ai-core::agent`.
 //!
 //! The real Codex implementation carries a full conversation history,
 //! token counts, and a rich set of status flags.  For the purpose of this
