@@ -1,4 +1,4 @@
-﻿# Sentinel Rust Crates — Full Audit Report
+# Sentinel Rust Crates — Full Audit Report
 
 > **Generated:** 2026-07-20
 > **Scope:** d:\ml-intern-main\ml-intern-main\crates\ — 22 crates, 115 .rs files, ~352 KB of source
@@ -142,18 +142,19 @@ coordination not wired. Partial test coverage.
 git_diff, git_commit, git_log. ToolRegistry with mutating flags. Sandbox boundary checks.
 MISSING: web_search is a stub (no real HTTP). No JSON schema input validation. Tests present.
 
-### sentinel-exec [PARTIAL]
-LocalExecutor with timeout, CWD, env vars, output capture. Blocking std::process. No sandbox
-integration. No async execution. No tests.
+### sentinel-exec [MOSTLY COMPLETE]
+LocalExecutor with timeout, CWD, env vars, output capture. Blocking std::process. 
+SandboxPolicy is wired and enforced for can_execute, can_write, and can_read. Tests present.
+MISSING: No async execution.
 
 ### sentinel-mcp [MOSTLY COMPLETE]
 McpClient for stdio-based MCP servers. initialize, tools/list, tools/call. McpTool wrapper
 adapts to Tool trait. MISSING: HTTP transport. No reconnection. No tests.
 
-### sentinel-sandbox [PARTIAL - CRITICAL GAP]
+### sentinel-sandbox [PARTIAL - IMPORTANT GAP]
 SandboxPolicy struct with can_read/write/execute checks. strict() preset.
 platform.rs stubs for Seccomp (Linux) / AppSandbox (macOS) -- these return Ok(()) with no
-actual enforcement. sentinel-exec does NOT call sandbox before running commands.
+actual enforcement. Policy IS enforced end-to-end by LocalExecutor.
 
 ### sentinel-app-server [MOSTLY COMPLETE]
 RequestHandler dispatching all JSON-RPC methods (ping, session CRUD, chat, chat/stream,
