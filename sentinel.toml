@@ -9,10 +9,7 @@ verbose = false
 id = "openrouter"
 name = "OpenRouter"
 base_url = "https://openrouter.ai/api/v1"
-auth = { type = "env_key", var = "OPENROUTER_API_KEY" }
-[providers.extra_headers]
-HTTP-Referer = "https://sentinel-ai.local"
-X-Title = "Sentinel-AI"
+auth = { var = "OPENROUTER_API_KEY" }
 
 [[providers.models]]
 id = "openrouter/auto"
