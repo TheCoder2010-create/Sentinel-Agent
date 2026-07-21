@@ -1,7 +1,9 @@
 use std::sync::Arc;
 use serde_json::Value;
 use sentinel_app_server_protocol::rpc::{JsonRpcRequest, JsonRpcResponse, JsonRpcError};
-use sentinel_core::thread_store::{ThreadStore, SqliteThreadStore};
+use sentinel_core::thread_store::ThreadStore;
+#[cfg(feature = "sqlite")]
+use sentinel_core::thread_store::SqliteThreadStore;
 use sentinel_app_server_protocol::api::{self, methods};
 use sentinel_config::SentinelConfig;
 use sentinel_tools::ToolRegistry;
@@ -29,15 +31,21 @@ impl RequestHandler {
         // Initialize thread store based on config
         let thread_store: Option<Arc<dyn ThreadStore>> = match config.thread_store.as_str() {
             "sqlite" => {
-                // Use a file named sentinel_threads.db in the current working directory
-                let db_path = std::env::current_dir()
-                    .expect("Failed to get current directory")
-                    .join("sentinel_threads.db");
-                match SqliteThreadStore::new(db_path) {
-                    Ok(store) => Some(Arc::new(store)),
-                    Err(e) => {
-                        panic!("Failed to initialize SQLite thread store: {}", e);
+                #[cfg(feature = "sqlite")]
+                {
+                    let db_path = std::env::current_dir()
+                        .expect("Failed to get current directory")
+                        .join("sentinel_threads.db");
+                    match SqliteThreadStore::new(db_path) {
+                        Ok(store) => Some(Arc::new(store)),
+                        Err(e) => {
+                            panic!("Failed to initialize SQLite thread store: {}", e);
+                        }
                     }
+                }
+                #[cfg(not(feature = "sqlite"))]
+                {
+                    panic!("sqlite feature not enabled for sentinel-app-server");
                 }
             }
             _ => None, // memory (no persistent store)

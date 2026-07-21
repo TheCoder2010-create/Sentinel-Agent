@@ -1,10 +1,9 @@
 use async_trait::async_trait;
 #[cfg(feature = "sqlite")]
 use rusqlite::{params, Connection};
-use std::sync::{Arc, Mutex};
-use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+use crate::budget::BudgetGuard;
 use crate::thread::AgentThread;
 use crate::conversation::Conversation;
 
@@ -19,6 +18,8 @@ pub struct SavedThread {
     pub max_iterations: u32,
     pub yolo_mode: bool,
     pub parent_thread_id: Option<String>,
+    pub budget_cost_cap_usd: Option<f64>,
+    pub budget_total_spend_usd: f64,
 }
 
 impl From<&AgentThread> for SavedThread {
@@ -32,12 +33,21 @@ impl From<&AgentThread> for SavedThread {
             max_iterations: t.max_iterations,
             yolo_mode: t.yolo_mode,
             parent_thread_id: t.parent_thread_id.clone(),
+            budget_cost_cap_usd: t.budget.cost_cap_usd,
+            budget_total_spend_usd: t.budget.total_spend_usd,
         }
     }
 }
 
 impl SavedThread {
     pub fn into_thread(self) -> AgentThread {
+        let mut budget = BudgetGuard::new(self.budget_cost_cap_usd, self.yolo_mode);
+        budget.total_spend_usd = self.budget_total_spend_usd;
+        if let Some(cap) = self.budget_cost_cap_usd {
+            if self.budget_total_spend_usd >= cap {
+                budget.exhausted = true;
+            }
+        }
         AgentThread {
             id: Uuid::parse_str(&self.id).unwrap_or_else(|_| Uuid::new_v4()),
             status: crate::thread::ThreadStatus::Idle,
@@ -49,6 +59,7 @@ impl SavedThread {
             max_iterations: self.max_iterations,
             yolo_mode: self.yolo_mode,
             parent_thread_id: self.parent_thread_id,
+            budget,
         }
     }
 }

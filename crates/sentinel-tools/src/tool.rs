@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use async_trait::async_trait;
 use sentinel_protocol::ToolDef;
 
@@ -6,7 +5,6 @@ use sentinel_protocol::ToolDef;
 pub struct ToolContext {
     pub workspace_dir: Option<String>,
     pub env_vars: std::collections::HashMap<String, String>,
-    pub sandbox: Option<Arc<SandboxPolicy>>,
 }
 
 impl Default for ToolContext {
@@ -20,13 +18,7 @@ impl ToolContext {
         Self {
             workspace_dir: None,
             env_vars: std::collections::HashMap::new(),
-            sandbox: None,
         }
-    }
-
-    pub fn with_sandbox(mut self, policy: Arc<SandboxPolicy>) -> Self {
-        self.sandbox = Some(policy);
-        self
     }
 }
 

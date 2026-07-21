@@ -12,6 +12,9 @@ pub fn builtin_tools() -> Vec<Arc<dyn Tool>> {
         Arc::new(GrepTool),
         Arc::new(BashTool),
         Arc::new(WebSearchTool),
+        Arc::new(WebFetchTool),
+        Arc::new(PlanTool),
+        Arc::new(GitHubTool),
         Arc::new(GitStatusTool),
         Arc::new(GitDiffTool),
         Arc::new(GitCommitTool),
@@ -37,7 +40,7 @@ impl Tool for ReadTool {
         })
     }
 
-    async fn execute(&self, args: serde_json::Value, ctx: &ToolContext) -> ToolOutput {
+    async fn execute(&self, args: serde_json::Value, _ctx: &ToolContext) -> ToolOutput {
         let path = args["file_path"].as_str().unwrap_or("");
         if path.is_empty() { return ToolOutput::err("file_path is required"); }
         match std::fs::read_to_string(path) {
@@ -65,7 +68,7 @@ impl Tool for WriteTool {
         })
     }
 
-    async fn execute(&self, args: serde_json::Value, ctx: &ToolContext) -> ToolOutput {
+    async fn execute(&self, args: serde_json::Value, _ctx: &ToolContext) -> ToolOutput {
         let path = args["file_path"].as_str().unwrap_or("");
         let content = args["content"].as_str().unwrap_or("");
         if path.is_empty() { return ToolOutput::err("file_path is required"); }
@@ -96,7 +99,7 @@ impl Tool for EditTool {
         })
     }
 
-    async fn execute(&self, args: serde_json::Value, ctx: &ToolContext) -> ToolOutput {
+    async fn execute(&self, args: serde_json::Value, _ctx: &ToolContext) -> ToolOutput {
         let path = args["file_path"].as_str().unwrap_or("");
         let old = args["old_string"].as_str().unwrap_or("");
         let new = args["new_string"].as_str().unwrap_or("");
@@ -151,7 +154,7 @@ impl Tool for GlobTool {
         })
     }
 
-    async fn execute(&self, args: serde_json::Value, ctx: &ToolContext) -> ToolOutput {
+    async fn execute(&self, args: serde_json::Value, _ctx: &ToolContext) -> ToolOutput {
         let pattern = args["pattern"].as_str().unwrap_or("");
         if pattern.is_empty() { return ToolOutput::err("pattern is required"); }
         let base_dir = args["path"].as_str().map(|p| p.to_string());
@@ -187,7 +190,7 @@ impl Tool for GrepTool {
         })
     }
 
-    async fn execute(&self, args: serde_json::Value, ctx: &ToolContext) -> ToolOutput {
+    async fn execute(&self, args: serde_json::Value, _ctx: &ToolContext) -> ToolOutput {
         let pattern = args["pattern"].as_str().unwrap_or("");
         if pattern.is_empty() { return ToolOutput::err("pattern is required"); }
         let path = args["path"].as_str().unwrap_or(".");
@@ -348,7 +351,7 @@ impl Tool for GitStatusTool {
         })
     }
 
-    async fn execute(&self, args: serde_json::Value, ctx: &ToolContext) -> ToolOutput {
+    async fn execute(&self, args: serde_json::Value, _ctx: &ToolContext) -> ToolOutput {
         let path = args["path"].as_str().unwrap_or(".");
         run_git(path, &["status", "--short"]).await
     }
@@ -371,7 +374,7 @@ impl Tool for GitDiffTool {
         })
     }
 
-    async fn execute(&self, args: serde_json::Value, ctx: &ToolContext) -> ToolOutput {
+    async fn execute(&self, args: serde_json::Value, _ctx: &ToolContext) -> ToolOutput {
         let path = args["path"].as_str().unwrap_or(".");
         let staged = args["staged"].as_bool().unwrap_or(false);
         if staged {
@@ -400,7 +403,7 @@ impl Tool for GitCommitTool {
         })
     }
 
-    async fn execute(&self, args: serde_json::Value, ctx: &ToolContext) -> ToolOutput {
+    async fn execute(&self, args: serde_json::Value, _ctx: &ToolContext) -> ToolOutput {
         let path = args["path"].as_str().unwrap_or(".");
         let message = args["message"].as_str().unwrap_or("");
         if message.is_empty() { return ToolOutput::err("commit message is required"); }
@@ -425,7 +428,7 @@ impl Tool for GitLogTool {
         })
     }
 
-    async fn execute(&self, args: serde_json::Value, ctx: &ToolContext) -> ToolOutput {
+    async fn execute(&self, args: serde_json::Value, _ctx: &ToolContext) -> ToolOutput {
         let path = args["path"].as_str().unwrap_or(".");
         let max_count = args["max_count"].as_u64().unwrap_or(10);
         run_git(path, &["log", "--oneline", &format!("-{}", max_count)]).await
@@ -455,6 +458,197 @@ async fn run_git(path: &str, args: &[&str]) -> ToolOutput {
             }
         }
         Err(e) => ToolOutput::err(format!("git command failed: {}", e)),
+    }
+}
+
+// ── WebFetch ──────────────────────────────────────────────────────
+pub struct WebFetchTool;
+#[async_trait]
+impl Tool for WebFetchTool {
+    fn name(&self) -> &str { "web_fetch" }
+    fn description(&self) -> &str { "Fetch content from a URL and return it as text" }
+    fn input_schema(&self) -> serde_json::Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "url": { "type": "string", "description": "URL to fetch" },
+                "format": { "type": "string", "enum": ["text", "markdown", "html"], "description": "Output format" }
+            },
+            "required": ["url"]
+        })
+    }
+
+    async fn execute(&self, args: serde_json::Value, _ctx: &ToolContext) -> ToolOutput {
+        let url = args["url"].as_str().unwrap_or("");
+        if url.is_empty() { return ToolOutput::err("url is required"); }
+
+        let client = reqwest::Client::builder()
+            .user_agent("SentinelAI/1.0")
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .unwrap();
+
+        match client.get(url).send().await {
+            Ok(resp) => {
+                let status = resp.status();
+                match resp.text().await {
+                    Ok(body) => {
+                        if status.is_success() {
+                            ToolOutput::ok(format!("Status: {}\n\n{}", status.as_u16(), body))
+                        } else {
+                            ToolOutput::err(format!("Status: {}\n\n{}", status.as_u16(), body))
+                        }
+                    }
+                    Err(e) => ToolOutput::err(format!("Failed to read response body: {}", e)),
+                }
+            }
+            Err(e) => ToolOutput::err(format!("Request failed: {}", e)),
+        }
+    }
+}
+
+// ── Plan ──────────────────────────────────────────────────────────
+pub struct PlanTool;
+#[async_trait]
+impl Tool for PlanTool {
+    fn name(&self) -> &str { "plan" }
+    fn description(&self) -> &str { "Create a structured task plan for multi-step work" }
+    fn is_mutating(&self) -> bool { false }
+    fn input_schema(&self) -> serde_json::Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "title": { "type": "string", "description": "Plan title" },
+                "steps": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "description": { "type": "string" },
+                            "priority": { "type": "string", "enum": ["high", "medium", "low"] }
+                        },
+                        "required": ["description"]
+                    },
+                    "description": "Ordered list of steps"
+                }
+            },
+            "required": ["title", "steps"]
+        })
+    }
+
+    async fn execute(&self, args: serde_json::Value, _ctx: &ToolContext) -> ToolOutput {
+        let title = args["title"].as_str().unwrap_or("Plan");
+        let steps = args["steps"].as_array();
+        if steps.is_none() || steps.unwrap().is_empty() {
+            return ToolOutput::err("steps must be a non-empty array");
+        }
+        let steps = steps.unwrap();
+        let mut output = format!("# {}\n\n", title);
+        for (i, step) in steps.iter().enumerate() {
+            let desc = step["description"].as_str().unwrap_or("(no description)");
+            let priority = step["priority"].as_str().unwrap_or("medium");
+            output.push_str(&format!("{}. [{}] {}\n", i + 1, priority, desc));
+        }
+        ToolOutput::ok(output)
+    }
+}
+
+// ── GitHub ────────────────────────────────────────────────────────
+pub struct GitHubTool;
+#[async_trait]
+impl Tool for GitHubTool {
+    fn name(&self) -> &str { "github" }
+    fn description(&self) -> &str { "Interact with GitHub API (issues, PRs, repos)" }
+    fn is_mutating(&self) -> bool { true }
+    fn input_schema(&self) -> serde_json::Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["create_issue", "create_pr", "list_issues", "get_repo"],
+                    "description": "GitHub action to perform"
+                },
+                "owner": { "type": "string", "description": "Repository owner" },
+                "repo": { "type": "string", "description": "Repository name" },
+                "title": { "type": "string", "description": "Issue/PR title" },
+                "body": { "type": "string", "description": "Issue/PR body" },
+                "head": { "type": "string", "description": "Head branch (for PRs)" },
+                "base": { "type": "string", "description": "Base branch (for PRs)" }
+            },
+            "required": ["action", "owner", "repo"]
+        })
+    }
+
+    async fn execute(&self, args: serde_json::Value, _ctx: &ToolContext) -> ToolOutput {
+        let action = args["action"].as_str().unwrap_or("");
+        let owner = args["owner"].as_str().unwrap_or("");
+        let repo = args["repo"].as_str().unwrap_or("");
+        if action.is_empty() || owner.is_empty() || repo.is_empty() {
+            return ToolOutput::err("action, owner, and repo are required");
+        }
+
+        let token = std::env::var("GITHUB_TOKEN").unwrap_or_default();
+        let client = reqwest::Client::new();
+        let api_base = format!("https://api.github.com/repos/{}/{}", owner, repo);
+
+        match action {
+            "get_repo" => {
+                match client.get(&api_base)
+                    .header("User-Agent", "SentinelAI")
+                    .bearer_auth(&token)
+                    .send().await
+                {
+                    Ok(resp) => ToolOutput::ok(resp.text().await.unwrap_or_default()),
+                    Err(e) => ToolOutput::err(format!("GitHub API error: {}", e)),
+                }
+            }
+            "list_issues" => {
+                let url = format!("{}/issues?state=open&per_page=10", api_base);
+                match client.get(&url)
+                    .header("User-Agent", "SentinelAI")
+                    .bearer_auth(&token)
+                    .send().await
+                {
+                    Ok(resp) => ToolOutput::ok(resp.text().await.unwrap_or_default()),
+                    Err(e) => ToolOutput::err(format!("GitHub API error: {}", e)),
+                }
+            }
+            "create_issue" => {
+                let title = args["title"].as_str().unwrap_or("");
+                let body = args["body"].as_str().unwrap_or("");
+                if title.is_empty() { return ToolOutput::err("title is required for create_issue"); }
+                let payload = json!({ "title": title, "body": body });
+                match client.post(&format!("{}/issues", api_base))
+                    .header("User-Agent", "SentinelAI")
+                    .bearer_auth(&token)
+                    .json(&payload)
+                    .send().await
+                {
+                    Ok(resp) => ToolOutput::ok(resp.text().await.unwrap_or_default()),
+                    Err(e) => ToolOutput::err(format!("GitHub API error: {}", e)),
+                }
+            }
+            "create_pr" => {
+                let title = args["title"].as_str().unwrap_or("");
+                let body = args["body"].as_str().unwrap_or("");
+                let head = args["head"].as_str().unwrap_or("");
+                let base = args["base"].as_str().unwrap_or("main");
+                if title.is_empty() { return ToolOutput::err("title is required for create_pr"); }
+                if head.is_empty() { return ToolOutput::err("head branch is required for create_pr"); }
+                let payload = json!({ "title": title, "body": body, "head": head, "base": base });
+                match client.post(&format!("{}/pulls", api_base))
+                    .header("User-Agent", "SentinelAI")
+                    .bearer_auth(&token)
+                    .json(&payload)
+                    .send().await
+                {
+                    Ok(resp) => ToolOutput::ok(resp.text().await.unwrap_or_default()),
+                    Err(e) => ToolOutput::err(format!("GitHub API error: {}", e)),
+                }
+            }
+            _ => ToolOutput::err(format!("Unknown action: {}", action)),
+        }
     }
 }
 
