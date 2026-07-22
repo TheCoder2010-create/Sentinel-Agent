@@ -11,6 +11,7 @@ pub mod prompt;
 pub mod messaging;
 pub mod uploader;
 pub mod phase;
+pub mod snapshot;
 
 pub use agent::*;
 pub use approval::*;

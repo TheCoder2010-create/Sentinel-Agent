@@ -3,13 +3,20 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout};
 use tokio::sync::Mutex;
 use std::sync::Arc;
+use std::time::Duration;
 use crate::transport::McpTransportConfig;
 use sentinel_protocol::ToolDef;
+
+const DEFAULT_RETRY_DELAY_MS: u64 = 1000;
+const MAX_RETRIES: u32 = 3;
 
 pub struct McpClient {
     id: String,
     transport: McpTransportConfig,
     process: Arc<Mutex<Option<McpProcess>>>,
+    http_client: Option<reqwest::Client>,
+    retry_delay_ms: u64,
+    max_retries: u32,
 }
 
 impl std::fmt::Debug for McpClient {
@@ -30,11 +37,28 @@ struct McpProcess {
 
 impl McpClient {
     pub fn new(id: impl Into<String>, transport: McpTransportConfig) -> Self {
+        let http_client = if matches!(&transport, McpTransportConfig::Http { .. }) {
+            Some(reqwest::Client::builder()
+                .timeout(Duration::from_secs(60))
+                .build()
+                .expect("valid reqwest client"))
+        } else {
+            None
+        };
         Self {
             id: id.into(),
             transport,
             process: Arc::new(Mutex::new(None)),
+            http_client,
+            retry_delay_ms: DEFAULT_RETRY_DELAY_MS,
+            max_retries: MAX_RETRIES,
         }
+    }
+
+    pub fn with_retry(mut self, delay_ms: u64, max_retries: u32) -> Self {
+        self.retry_delay_ms = delay_ms;
+        self.max_retries = max_retries;
+        self
     }
 
     pub fn id(&self) -> &str { &self.id }
@@ -71,13 +95,23 @@ impl McpClient {
                         next_id: 1,
                     });
                 }
-                _ => return Err(McpError::NotImplemented("HTTP/WS persistent connections")),
+                McpTransportConfig::Http { .. } | McpTransportConfig::WebSocket { .. } => {
+                    // HTTP and WebSocket don't use persistent process — handled in send_request
+                }
             }
         }
         Ok(&self.process)
     }
 
     async fn send_request(&self, method: &str, params: Value) -> Result<Value, McpError> {
+        match &self.transport {
+            McpTransportConfig::Stdio { .. } => self.send_stdio(method, params).await,
+            McpTransportConfig::Http { url, headers } => self.send_http(method, params, url, headers.as_ref()).await,
+            McpTransportConfig::WebSocket { .. } => Err(McpError::NotImplemented("WebSocket transport")),
+        }
+    }
+
+    async fn send_stdio(&self, method: &str, params: Value) -> Result<Value, McpError> {
         let proc_ref = self.ensure_connected().await?;
         let mut guard = proc_ref.lock().await;
         let proc = guard.as_mut().ok_or(McpError::NotConnected)?;
@@ -101,7 +135,6 @@ impl McpClient {
         proc.stdin.flush().await
             .map_err(|e| McpError::WriteError(e.to_string()))?;
 
-        // Read response line-by-line until we find our id
         let mut response_line = String::new();
         loop {
             response_line.clear();
@@ -122,8 +155,74 @@ impl McpClient {
         }
     }
 
+    async fn send_http(
+        &self,
+        method: &str,
+        params: Value,
+        url: &str,
+        headers: Option<&std::collections::HashMap<String, String>>,
+    ) -> Result<Value, McpError> {
+        let client = self.http_client.as_ref()
+            .ok_or(McpError::NotConnected)?;
+
+        let request = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1u64,
+            "method": method,
+            "params": params,
+        });
+
+        let mut req = client.post(url).json(&request);
+        if let Some(hdrs) = headers {
+            for (k, v) in hdrs {
+                if let (Ok(name), Ok(val)) = (
+                    reqwest::header::HeaderName::from_bytes(k.as_bytes()),
+                    reqwest::header::HeaderValue::from_str(v),
+                ) {
+                    req = req.header(name, val);
+                }
+            }
+        }
+
+        let response = req.send().await
+            .map_err(|e| McpError::WriteError(format!("HTTP request failed: {}", e)))?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let text = response.text().await.unwrap_or_default();
+            return Err(McpError::RemoteError(format!("HTTP {}: {}", status, text)));
+        }
+
+        let body: Value = response.json().await
+            .map_err(|e| McpError::ParseError(format!("Failed to parse HTTP response: {}", e)))?;
+
+        if let Some(error) = body["error"].as_object() {
+            let msg = error["message"].as_str().unwrap_or("unknown error");
+            return Err(McpError::RemoteError(msg.to_string()));
+        }
+
+        Ok(body["result"].clone())
+    }
+
+    pub async fn send_request_with_retry(&self, method: &str, params: Value) -> Result<Value, McpError> {
+        let mut last_err = None;
+        for attempt in 0..=self.max_retries {
+            match self.send_request(method, params.clone()).await {
+                Ok(result) => return Ok(result),
+                Err(e) => {
+                    tracing::warn!("MCP request failed (attempt {}/{}): {}", attempt + 1, self.max_retries + 1, e);
+                    last_err = Some(e);
+                    if attempt < self.max_retries {
+                        tokio::time::sleep(Duration::from_millis(self.retry_delay_ms * (1 << attempt))).await;
+                    }
+                }
+            }
+        }
+        Err(last_err.unwrap_or(McpError::NotConnected))
+    }
+
     pub async fn list_tools(&self) -> Result<Vec<ToolDef>, McpError> {
-        let result = self.send_request("tools/list", serde_json::json!({})).await?;
+        let result = self.send_request_with_retry("tools/list", serde_json::json!({})).await?;
 
         let tools = result["tools"].as_array()
             .ok_or(McpError::ParseError("No tools array in response".into()))?;
@@ -138,7 +237,7 @@ impl McpClient {
     }
 
     pub async fn call_tool(&self, name: &str, args: Value) -> Result<String, McpError> {
-        let result = self.send_request("tools/call", serde_json::json!({
+        let result = self.send_request_with_retry("tools/call", serde_json::json!({
             "name": name,
             "arguments": args,
         })).await?;
@@ -152,20 +251,22 @@ impl McpClient {
     }
 
     pub async fn close(&self) {
-        let mut guard = self.process.lock().await;
-        if let Some(mut proc) = guard.take() {
-            let _ = proc.stdin.shutdown().await;
-            let _ = proc.child.wait().await;
+        if matches!(&self.transport, McpTransportConfig::Stdio { .. }) {
+            let mut guard = self.process.lock().await;
+            if let Some(mut proc) = guard.take() {
+                let _ = proc.stdin.shutdown().await;
+                let _ = proc.child.wait().await;
+            }
         }
     }
 }
 
 impl Drop for McpClient {
     fn drop(&mut self) {
-        // Best-effort kill of the child process; this is a blocking call
-        // but it only runs during shutdown.
-        if let Some(mut proc) = self.process.try_lock().ok().and_then(|mut g| g.take()) {
-            drop(proc.child.kill());
+        if matches!(&self.transport, McpTransportConfig::Stdio { .. }) {
+            if let Some(mut proc) = self.process.try_lock().ok().and_then(|mut g| g.take()) {
+                drop(proc.child.kill());
+            }
         }
     }
 }
