@@ -20,4 +20,5 @@ sentinel-config = { path = "../sentinel-config" }
 sentinel-analytics = { path = "../sentinel-analytics" }
 sentinel-tools = { path = "../sentinel-tools" }
 sentinel-app-server-protocol = { path = "../sentinel-app-server-protocol" }
+sentinel-mcp = { path = "../sentinel-mcp" }
 uuid = { workspace = true }

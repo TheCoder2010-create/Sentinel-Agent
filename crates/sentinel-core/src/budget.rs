@@ -106,6 +106,11 @@ impl BudgetGuard {
         }
     }
 
+    /// Total confirmed spend.
+    pub fn total_spent(&self) -> f64 {
+        self.total_spend_usd
+    }
+
     /// Check if a proposed cost is within budget.
     pub fn would_exceed_cap(&self, cost_usd: f64) -> bool {
         self.cost_cap_usd

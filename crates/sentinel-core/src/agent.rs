@@ -11,9 +11,11 @@ use sentinel_protocol::{
 use sentinel_provider::{ModelProvider, ProviderError};
 use sentinel_tools::{ToolRegistry, ToolContext};
 use sentinel_config::SentinelConfig;
+use sentinel_plugin_system::{PluginRegistry, PluginEvent};
 use crate::thread::{AgentThread, ThreadStatus, ApprovalRequest};
 use crate::prompt::SystemPromptManager;
 use crate::event::{SharedEventStore, SessionEvent};
+use crate::uploader::{SessionUploader, SessionPayload, NullUploader, create_uploader};
 
 const TRUNCATION_HINT: &str = "\
 Your previous response was truncated because the output hit the token limit. \
@@ -56,6 +58,8 @@ pub struct Agent {
     phase_callback: Option<Arc<dyn Fn(crate::thread::Phase) + Send + Sync>>,
     pub total_prompt_tokens: AtomicU64,
     pub total_completion_tokens: AtomicU64,
+    uploader: Box<dyn SessionUploader>,
+    plugin_registry: Arc<PluginRegistry>,
 }
 
 impl std::fmt::Debug for Agent {
@@ -84,6 +88,8 @@ impl Agent {
             phase_callback: None,
             total_prompt_tokens: AtomicU64::new(0),
             total_completion_tokens: AtomicU64::new(0),
+            uploader: Box::new(NullUploader),
+            plugin_registry: Arc::new(PluginRegistry::new()),
         }
     }
 
@@ -110,6 +116,21 @@ impl Agent {
         self
     }
 
+    pub fn with_uploader(mut self, uploader: Box<dyn SessionUploader>) -> Self {
+        self.uploader = uploader;
+        self
+    }
+
+    pub fn with_uploader_from_config(mut self, config: &crate::uploader::UploadConfig) -> Self {
+        self.uploader = create_uploader(config);
+        self
+    }
+
+    pub fn with_plugin_registry(mut self, registry: Arc<PluginRegistry>) -> Self {
+        self.plugin_registry = registry;
+        self
+    }
+
     pub fn prompt_manager(&self) -> &SystemPromptManager {
         &self.prompt_manager
     }
@@ -128,8 +149,28 @@ impl Agent {
         user_input: &str,
         approval: &dyn ApprovalGate,
     ) -> AgentResult {
+        let result = self.run_with_approval_inner(thread, user_input, approval).await;
+        self.dispatch_plugin_event(&PluginEvent::SessionEnded {
+            session_id: thread.id.to_string(),
+        }).await;
+        if result.is_ok() {
+            self.upload_session(thread).await;
+        }
+        result
+    }
+
+    async fn run_with_approval_inner(
+        &self,
+        thread: &mut AgentThread,
+        user_input: &str,
+        approval: &dyn ApprovalGate,
+    ) -> AgentResult {
         let now = chrono::Utc::now();
         let sid = thread.id;
+
+        self.dispatch_plugin_event(&PluginEvent::SessionCreated {
+            session_id: sid.to_string(),
+        }).await;
 
         self.event_store.append(SessionEvent::UserMessage {
             session_id: sid.to_string(),
@@ -164,6 +205,11 @@ impl Agent {
                 req
             };
 
+            self.dispatch_plugin_event(&PluginEvent::BeforeModelRequest {
+                model: self.config.agent.default_model.clone(),
+                prompt_tokens: 0,
+            }).await;
+
             let response = match self.provider.complete(&req).await {
                 Ok(r) => r,
                 Err(e) => {
@@ -175,6 +221,12 @@ impl Agent {
                     return Ok(AgentOutput::error(format!("LLM call failed: {}", e)));
                 }
             };
+
+            let completion_tokens = response.usage.as_ref().map(|u| u.completion_tokens).unwrap_or(0);
+            self.dispatch_plugin_event(&PluginEvent::AfterModelResponse {
+                model: self.config.agent.default_model.clone(),
+                completion_tokens,
+            }).await;
 
             if let Some(ref usage) = response.usage {
                 self.total_prompt_tokens.fetch_add(usage.prompt_tokens as u64, Ordering::Relaxed);
@@ -548,6 +600,28 @@ impl Agent {
                 }
             }
         }
+    }
+
+    async fn upload_session(&self, thread: &AgentThread) {
+        let payload = SessionPayload {
+            id: thread.id.to_string(),
+            turns: thread.turn,
+            iterations: thread.iterations,
+            total_tokens: self.total_prompt_tokens.load(Ordering::Relaxed)
+                + self.total_completion_tokens.load(Ordering::Relaxed),
+            total_cost_usd: thread.budget.total_spent(),
+            conversation: thread.conversation.clone(),
+            created_at: String::new(),
+            updated_at: chrono::Utc::now().to_rfc3339(),
+        };
+        let result = self.uploader.upload(&payload).await;
+        if !result.ok {
+            tracing::warn!(error = ?result.error, "session upload failed");
+        }
+    }
+
+    async fn dispatch_plugin_event(&self, event: &PluginEvent) {
+        self.plugin_registry.dispatch(event).await;
     }
 
     fn build_request(&self, _thread: &AgentThread) -> CompletionRequest {

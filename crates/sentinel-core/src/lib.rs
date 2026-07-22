@@ -14,6 +14,7 @@ pub mod phase;
 pub mod snapshot;
 pub mod sanitize;
 pub mod sub_agent;
+pub mod sub_agent_tool;
 
 pub use agent::*;
 pub use approval::*;
@@ -25,3 +26,4 @@ pub use thread_store::*;
 pub use prompt::*;
 pub use messaging::*;
 pub use uploader::*;
+pub use sub_agent_tool::*;

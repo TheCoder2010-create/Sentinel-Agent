@@ -49,17 +49,23 @@ pub async fn run_main(cli: Cli) -> anyhow::Result<()> {
         Box::new(HumanProcessor::new())
     };
 
-    // Resolve the prompt – either from STDIN or from the `review` subcommand.
+    // Handle MCP subcommand
+    if let Some(cli::SubCommand::Mcp) = cli.subcommand {
+        let registry = ToolRegistry::new();
+        let server = sentinel_mcp::McpServer::new(Arc::new(registry));
+        return server.run_stdio().await.map_err(|e| anyhow::anyhow!("MCP error: {}", e));
+    }
+
+    // Resolve the prompt – either from STDIN or from subcommands.
     let prompt = if let Some(sub) = cli.subcommand {
         match sub {
             cli::SubCommand::Resume { session_id } => {
-                // For the mock we ignore the session id and just note it.
                 format!("[Resuming session {}]", session_id)
             }
             cli::SubCommand::Review { path } => {
-                // Load the file contents for a review request.
                 std::fs::read_to_string(&path).unwrap_or_else(|_| "<failed to read>".into())
             }
+            cli::SubCommand::Mcp => unreachable!(), // handled above
         }
     } else {
         // No subcommand – read the prompt from stdin.

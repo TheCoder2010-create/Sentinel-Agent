@@ -41,4 +41,6 @@ pub enum SubCommand {
         #[arg(value_name = "PATH")]
         path: PathBuf,
     },
+    /// Run as an MCP stdio server (Model Context Protocol).
+    Mcp,
 }
