@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 use sentinel_protocol::{CompletionRequest, CompletionResponse};
 use crate::error::ProviderError;
-use super::framing::{FrameStream, FramingProvider};
+use super::framing::FramingProvider;
 
 #[async_trait]
 pub trait Protocol: Send + Sync {
@@ -90,18 +90,18 @@ impl<P: Protocol> Route<P> {
             .map_err(|e| ProviderError::RequestError(e.to_string()))?;
 
         if !resp.status().is_success() {
-            let status = resp.status();
+            let status = resp.status().as_u16();
             let text = resp.text().await.unwrap_or_default();
-            return Err(ProviderError::ApiError(format!("HTTP {}: {}", status, text)));
+            return Err(ProviderError::ApiError { status, body: text });
         }
 
         let json: serde_json::Value = resp
             .json()
             .await
-            .map_err(|e| ProviderError::JsonError(e.to_string()))?;
+            .map_err(|e| ProviderError::RequestError(e.to_string()))?;
 
         let response: CompletionResponse = serde_json::from_value(json)
-            .map_err(|e| ProviderError::JsonError(e.to_string()))?;
+            .map_err(ProviderError::JsonError)?;
 
         Ok(response)
     }
@@ -134,9 +134,9 @@ impl<P: Protocol> Route<P> {
             .map_err(|e| ProviderError::RequestError(e.to_string()))?;
 
         if !resp.status().is_success() {
-            let status = resp.status();
+            let status = resp.status().as_u16();
             let text = resp.text().await.unwrap_or_default();
-            return Err(ProviderError::ApiError(format!("HTTP {}: {}", status, text)));
+            return Err(ProviderError::ApiError { status, body: text });
         }
 
         let frame_stream = self.framing.stream_frames(resp).await?;
@@ -144,7 +144,7 @@ impl<P: Protocol> Route<P> {
         let parsed = tokio_stream::StreamExt::map(frame_stream, |frame_result| {
             frame_result.and_then(|bytes| {
                 serde_json::from_slice::<sentinel_protocol::StreamChunk>(&bytes)
-                    .map_err(|e| ProviderError::JsonError(e.to_string()))
+                    .map_err(ProviderError::JsonError)
             })
         });
 

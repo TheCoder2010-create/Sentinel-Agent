@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use async_trait::async_trait;
-use sentinel_protocol::{CompletionRequest, CompletionResponse, StreamChunk, Choice, Usage};
+use sentinel_protocol::{CompletionRequest, CompletionResponse, Choice};
 use crate::error::ProviderError;
 use crate::route::{Protocol, Endpoint, Auth, Route, FramingProvider};
 
@@ -94,7 +94,6 @@ impl OpenAIChatProtocol {
         let mut text_parts = Vec::new();
         let mut tool_calls = Vec::new();
         let mut tool_call_id = None;
-        let mut tool_name = None;
         for block in &msg.content {
             match block {
                 sentinel_protocol::ContentBlock::Text { text } => {
@@ -122,18 +121,9 @@ impl OpenAIChatProtocol {
         if !text_parts.is_empty() {
             json["content"] = serde_json::Value::String(text_parts.join(""));
         }
-        if let Some(ref role_str) = msg.role.to_string().as_str() {
-            if *role_str == "tool" {
-                if let Some(tci) = tool_call_id {
-                    json["tool_call_id"] = serde_json::Value::String(tci.to_string());
-                }
-                if let Some(name) = &msg.content.iter().find_map(|b| {
-                    if let sentinel_protocol::ContentBlock::ToolResult { name, .. } = b {
-                        Some(name.clone())
-                    } else { None }
-                }) {
-                    json["name"] = serde_json::Value::String(name);
-                }
+        if matches!(msg.role, sentinel_protocol::Role::Tool) {
+            if let Some(tci) = tool_call_id {
+                json["tool_call_id"] = serde_json::Value::String(tci.to_string());
             }
         }
         json
@@ -176,7 +166,7 @@ impl Protocol for OpenAIChatProtocol {
     }
 
     fn serialize_body(&self, body: &Self::Body) -> Result<Vec<u8>, ProviderError> {
-        serde_json::to_vec(body).map_err(|e| ProviderError::JsonError(e.to_string()))
+        serde_json::to_vec(body).map_err(ProviderError::JsonError)
     }
 
     fn parse_frame(&self, frame: Vec<u8>) -> Result<Option<Self::Event>, ProviderError> {
@@ -185,7 +175,7 @@ impl Protocol for OpenAIChatProtocol {
         }
         let text = String::from_utf8_lossy(&frame);
         let json: OpenAIStreamChunk = serde_json::from_str(&text)
-            .map_err(|e| ProviderError::JsonError(format!("frame parse: {}", e)))?;
+            .map_err(ProviderError::JsonError)?;
         Ok(Some(json))
     }
 
@@ -254,13 +244,11 @@ impl Protocol for OpenAIChatProtocol {
         let message = sentinel_protocol::Message::new(sentinel_protocol::Role::Assistant, content);
         CompletionResponse {
             id: state.id,
-            object: "chat.completion".into(),
-            created: state.created as i64,
             model: state.model,
             choices: vec![Choice {
                 index: 0,
                 message,
-                finish_reason: state.finish_reason.unwrap_or_default(),
+                finish_reason: state.finish_reason,
             }],
             usage: None,
         }
@@ -293,7 +281,7 @@ impl OpenAIChatProtocol {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sentinel_protocol::{Message, Role};
+    use sentinel_protocol::Message;
 
     #[test]
     fn test_build_body_basic() {

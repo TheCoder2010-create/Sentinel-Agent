@@ -200,7 +200,7 @@ impl Protocol for AnthropicMessagesProtocol {
     }
 
     fn serialize_body(&self, body: &Self::Body) -> Result<Vec<u8>, ProviderError> {
-        serde_json::to_vec(body).map_err(|e| ProviderError::JsonError(e.to_string()))
+        serde_json::to_vec(body).map_err(ProviderError::JsonError)
     }
 
     fn parse_frame(&self, frame: Vec<u8>) -> Result<Option<Self::Event>, ProviderError> {
@@ -209,7 +209,7 @@ impl Protocol for AnthropicMessagesProtocol {
         }
         let text = String::from_utf8_lossy(&frame);
         let json: AnthropicStreamEvent = serde_json::from_str(&text)
-            .map_err(|e| ProviderError::JsonError(format!("anthropic frame: {}", e)))?;
+            .map_err(ProviderError::JsonError)?;
         Ok(Some(json))
     }
 
@@ -251,7 +251,7 @@ impl Protocol for AnthropicMessagesProtocol {
                 if let Some(delta) = event.delta {
                     if let Some(text) = delta.text {
                         if let Some(last) = state.content.last_mut() {
-                            if let AnthropicResponseContent::Text { ref mut text: t } = last {
+                            if let AnthropicResponseContent::Text { text: ref mut t, .. } = last {
                                 t.push_str(&text);
                             }
                         }
@@ -278,10 +278,10 @@ impl Protocol for AnthropicMessagesProtocol {
         let mut message_content = Vec::new();
         for c in &state.content {
             match c {
-                AnthropicResponseContent::Text { text } => {
+                AnthropicResponseContent::Text { text, .. } => {
                     message_content.push(sentinel_protocol::ContentBlock::Text { text: text.clone() });
                 }
-                AnthropicResponseContent::ToolUse { id, name, input } => {
+                AnthropicResponseContent::ToolUse { id, name, input, .. } => {
                     message_content.push(sentinel_protocol::ContentBlock::ToolCall {
                         id: id.clone(),
                         name: name.clone(),
@@ -298,13 +298,11 @@ impl Protocol for AnthropicMessagesProtocol {
         });
         CompletionResponse {
             id: state.id,
-            object: "message".into(),
-            created: 0,
             model: state.model,
             choices: vec![Choice {
                 index: 0,
                 message,
-                finish_reason: state.stop_reason.unwrap_or_default(),
+                finish_reason: state.stop_reason,
             }],
             usage,
         }
@@ -330,7 +328,7 @@ impl AnthropicMessagesProtocol {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sentinel_protocol::{Message, Role, ContentBlock};
+    use sentinel_protocol::Message;
 
     #[test]
     fn test_build_body_with_system() {
@@ -352,9 +350,8 @@ mod tests {
         let tool_msg = sentinel_protocol::Message::new(sentinel_protocol::Role::Tool, vec![
             sentinel_protocol::ContentBlock::ToolResult {
                 tool_call_id: "tc1".into(),
-                name: "get_weather".into(),
                 content: "sunny".into(),
-                is_error: false,
+                is_error: Some(false),
             }
         ]);
         req = req.with_message(tool_msg);
