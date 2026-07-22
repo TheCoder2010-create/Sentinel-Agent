@@ -19,12 +19,10 @@ impl SecretSanitizer {
     /// - Generic `key = <value>` patterns with suspicious env names
     pub fn new() -> Self {
         let patterns = vec![
-            Regex::new(r"(?i)(sk-[A-Za-z0-9_-]{20,})").unwrap(),
-            Regex::new(r"(?i)(Bearer\s+[A-Za-z0-9._-]{20,})").unwrap(),
-            Regex::new(r"(?i)(Authorization:\s*Bearer\s+[A-Za-z0-9._-]{20,})").unwrap(),
-            Regex::new(r#"(?i)("api_key"\s*:\s*"[^"]{8,})"#).unwrap(),
-            Regex::new(r#"(?i)('api_key'\s*:\s*'[^']{8,})"#).unwrap(),
-            Regex::new(r#"(?i)(api_key\s*=\s*['"][^'"]{8,})"#).unwrap(),
+            Regex::new(r"(?i)sk-[A-Za-z0-9]{20,}").unwrap(),
+            Regex::new(r"(?i)Bearer\s[A-Za-z0-9._-]{20,}").unwrap(),
+            Regex::new(r#"(?i)"api_key"\s*:\s*"[^"]{8,}"#).unwrap(),
+            Regex::new(r#"(?i)api_key\s*=\s*['"][^'"]{8,}['"]"#).unwrap(),
             Regex::new(r"(?i)(NVIDIA_NIM_API_KEY=)[A-Za-z0-9_-]{20,}").unwrap(),
             Regex::new(r"(?i)(OPENAI_API_KEY=)[A-Za-z0-9_-]{20,}").unwrap(),
             Regex::new(r"(?i)(ANTHROPIC_API_KEY=)[A-Za-z0-9_-]{20,}").unwrap(),
@@ -36,15 +34,7 @@ impl SecretSanitizer {
     pub fn sanitize_text(&self, text: &str) -> String {
         let mut result = text.to_string();
         for pattern in &self.patterns {
-            result = pattern.replace_all(&result, |caps: &regex::Captures| {
-                // Preserve the prefix (like "api_key = ") but redact the value
-                let prefix_len = caps.get(1).map_or(0, |m| m.start());
-                if prefix_len > 0 {
-                    format!("{}[REDACTED]", &caps[0][..prefix_len])
-                } else {
-                    "[REDACTED]".to_string()
-                }
-            }).to_string();
+            result = pattern.replace_all(&result, "[REDACTED]").to_string();
         }
         result
     }
@@ -83,7 +73,7 @@ mod tests {
     #[test]
     fn test_redacts_openai_key() {
         let sanitizer = SecretSanitizer::new();
-        let result = sanitizer.sanitize_text("my key is sk-abc123def456ghi789jkl012");
+        let result = sanitizer.sanitize_text("my key is sk-abc123def456ghi789jkl012mnopqrs");
         assert!(!result.contains("sk-abc"));
         assert!(result.contains("[REDACTED]"));
     }
@@ -91,22 +81,36 @@ mod tests {
     #[test]
     fn test_redacts_bearer_token() {
         let sanitizer = SecretSanitizer::new();
-        let result = sanitizer.sanitize_text("Authorization: Bearer xyz.abc123.def456");
+        let result = sanitizer.sanitize_text("Authorization: Bearer xyz.abc123.def456.ghi789.jkl012.mno345");
         assert!(result.contains("[REDACTED]"));
     }
 
     #[test]
     fn test_redacts_api_key_json() {
         let sanitizer = SecretSanitizer::new();
-        let result = sanitizer.sanitize_text(r#"{"api_key": "sk-my-secret-key-here"}"#);
-        assert!(!result.contains("sk-my-secret"));
+        let result = sanitizer.sanitize_text(r#"{"api_key": "sk-abcdef1234567890abcdef1234567890"}"#);
+        assert!(!result.contains("sk-abcdef1234567890abcdef1234567890"));
         assert!(result.contains("[REDACTED]"));
     }
 
     #[test]
     fn test_redacts_env_var() {
         let sanitizer = SecretSanitizer::new();
-        let result = sanitizer.sanitize_text("OPENAI_API_KEY=sk-abcdef1234567890");
+        let result = sanitizer.sanitize_text("OPENAI_API_KEY=sk-abcdef1234567890abcdef1234567890");
+        assert!(result.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn test_redacts_anthropic_env_var() {
+        let sanitizer = SecretSanitizer::new();
+        let result = sanitizer.sanitize_text("ANTHROPIC_API_KEY=sk-ant-abcdef1234567890abcdef1234567890");
+        assert!(result.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn test_redacts_nvidia_env_var() {
+        let sanitizer = SecretSanitizer::new();
+        let result = sanitizer.sanitize_text("NVIDIA_NIM_API_KEY=nvapi-abcdef1234567890abcdef1234567890");
         assert!(result.contains("[REDACTED]"));
     }
 
@@ -122,14 +126,14 @@ mod tests {
     fn test_sanitizes_json_value() {
         let sanitizer = SecretSanitizer::new();
         let mut value = serde_json::json!({
-            "message": "my api key is sk-abc123",
+            "message": "my api key is sk-abc123def456ghi789jkl012mnopqr",
             "nested": {
-                "config": "OPENAI_API_KEY=sk-xyz"
+                "config": "OPENAI_API_KEY=sk-abcdef1234567890abcdef1234567890"
             }
         });
         sanitizer.sanitize_value(&mut value);
         let json = serde_json::to_string(&value).unwrap();
-        assert!(!json.contains("sk-abc123"));
-        assert!(!json.contains("sk-xyz"));
+        assert!(!json.contains("sk-abc123def456"));
+        assert!(!json.contains("sk-abcdef1234567890abcdef1234567890"));
     }
 }

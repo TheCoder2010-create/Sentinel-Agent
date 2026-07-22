@@ -13,6 +13,7 @@ pub mod uploader;
 pub mod phase;
 pub mod snapshot;
 pub mod sanitize;
+pub mod sub_agent;
 
 pub use agent::*;
 pub use approval::*;

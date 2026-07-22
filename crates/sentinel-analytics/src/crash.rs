@@ -142,7 +142,7 @@ mod tests {
     #[test]
     fn test_install_crash_hook_is_idempotent() {
         let called = Arc::new(Mutex::new(0u32));
-        let called_clone = Arc::clone(&called);
+        let _called_clone = Arc::clone(&called);
 
         // Install once
         install_crash_hook(None, None);

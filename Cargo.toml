@@ -22,6 +22,8 @@ members = [
     "crates/sentinel-ai-exec",
     "crates/sentinel-ai-tui",
     "crates/sentinel-ai-test-support",
+    "crates/sentinel-plugin-system",
+    "crates/sentinel-lsp",
 ]
 
 [workspace.package]
