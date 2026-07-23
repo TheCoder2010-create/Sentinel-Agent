@@ -18,13 +18,13 @@ use crate::event::{SharedEventStore, SessionEvent};
 use crate::uploader::{SessionUploader, SessionPayload, NullUploader, create_uploader};
 use crate::compression::{ContentCompressor, NullCompressor};
 
-const TRUNCATION_HINT: &str = "\
+pub(crate) const TRUNCATION_HINT: &str = "\
 Your previous response was truncated because the output hit the token limit. \
 The following tool calls were lost. \
 IMPORTANT: Do NOT retry with the same large content. Instead: \
 use bash with cat<<'HEREDOC' to write files, or split into several smaller tool calls.";
 
-const MALFORMED_TOOL_CALL_HINT: &str = "\
+pub(crate) const MALFORMED_TOOL_CALL_HINT: &str = "\
 Your previous response contained malformed tool calls that could not be executed. \
 Issues found: \
 - Empty or missing tool call ID \
@@ -33,7 +33,7 @@ Issues found: \
 Please correct the tool calls and retry. Do NOT repeat the same malformed calls.";
 
 /// Validate tool calls and return OK or describe the malformation.
-fn validate_tool_calls(tool_calls: &[(String, String, serde_json::Value)]) -> Result<(), Vec<String>> {
+pub(crate) fn validate_tool_calls(tool_calls: &[(String, String, serde_json::Value)]) -> Result<(), Vec<String>> {
     let mut errors = Vec::new();
     for (i, (id, name, args)) in tool_calls.iter().enumerate() {
         if id.is_empty() {
@@ -50,18 +50,18 @@ fn validate_tool_calls(tool_calls: &[(String, String, serde_json::Value)]) -> Re
 }
 
 pub struct Agent {
-    provider: Arc<dyn ModelProvider>,
-    tools: Arc<ToolRegistry>,
-    config: Arc<SentinelConfig>,
-    events: Arc<dyn EventHandler>,
-    event_store: SharedEventStore,
-    prompt_manager: SystemPromptManager,
-    phase_callback: Option<Arc<dyn Fn(crate::thread::Phase) + Send + Sync>>,
+    pub(crate) provider: Arc<dyn ModelProvider>,
+    pub(crate) tools: Arc<ToolRegistry>,
+    pub(crate) config: Arc<SentinelConfig>,
+    pub(crate) events: Arc<dyn EventHandler>,
+    pub(crate) event_store: SharedEventStore,
+    pub(crate) prompt_manager: SystemPromptManager,
+    pub(crate) phase_callback: Option<Arc<dyn Fn(crate::thread::Phase) + Send + Sync>>,
     pub total_prompt_tokens: AtomicU64,
     pub total_completion_tokens: AtomicU64,
-    uploader: Box<dyn SessionUploader>,
-    plugin_registry: Arc<PluginRegistry>,
-    compressor: Arc<dyn ContentCompressor>,
+    pub(crate) uploader: Box<dyn SessionUploader>,
+    pub(crate) plugin_registry: Arc<PluginRegistry>,
+    pub(crate) compressor: Arc<dyn ContentCompressor>,
 }
 
 impl std::fmt::Debug for Agent {
@@ -647,7 +647,7 @@ impl Agent {
     }
 }
 
-async fn execute_tools_concurrent(
+pub(crate) async fn execute_tools_concurrent(
     tool_calls: &[(String, String, serde_json::Value)],
     tools: Arc<ToolRegistry>,
     approval: &dyn ApprovalGate,
@@ -773,6 +773,12 @@ impl AgentOutput {
     }
     pub fn error(message: impl Into<String>) -> Self {
         Self::Error { message: message.into() }
+    }
+    pub fn text_or_empty(&self) -> String {
+        match self {
+            Self::Success { text } => text.clone(),
+            Self::Error { .. } => String::new(),
+        }
     }
 }
 

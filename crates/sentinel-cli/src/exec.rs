@@ -88,6 +88,8 @@ pub async fn run(args: &[String]) -> anyhow::Result<()> {
         .with_event_handler(Arc::new(CliEventHandler))
         .with_compressor(headroom_compressor);
 
+    let pipeline_agent = sentinel_core::pipeline::PipelineAgent::new(agent);
+
     let mut thread = sentinel_core::AgentThread::new(
         config.agent.max_turns,
         config.agent.max_iterations,
@@ -97,7 +99,7 @@ pub async fn run(args: &[String]) -> anyhow::Result<()> {
     print_banner();
     println!(" Model:  {}", model_id.green().bold());
     println!(" Yolo:   {}", if config.agent.yolo_mode { "yes".green() } else { "no".yellow() });
-    println!(" Stream: {}", "yes".cyan());
+    println!(" Pipeline: {}", "read → triage → draft → QA → send".cyan());
     print_divider();
 
     let approval: Box<dyn sentinel_core::ApprovalGate> = if config.agent.yolo_mode {
@@ -106,7 +108,7 @@ pub async fn run(args: &[String]) -> anyhow::Result<()> {
         Box::new(CliApprovalGate)
     };
 
-    let result = agent.run_streaming(&mut thread, &prompt, approval.as_ref()).await;
+    let result = pipeline_agent.run_pipeline(&mut thread, &prompt, approval.as_ref()).await;
 
     match result {
         Ok(output) => match output {
@@ -122,7 +124,7 @@ pub async fn run(args: &[String]) -> anyhow::Result<()> {
         }
     }
 
-    let (prompt_tok, completion_tok) = (agent.prompt_tokens(), agent.completion_tokens());
+    let (prompt_tok, completion_tok) = (pipeline_agent.inner().prompt_tokens(), pipeline_agent.inner().completion_tokens());
     let token_info = if prompt_tok > 0 || completion_tok > 0 {
         format!("{} in, {} out", prompt_tok, completion_tok)
     } else {

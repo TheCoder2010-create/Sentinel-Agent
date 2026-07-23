@@ -16,6 +16,7 @@ pub mod sanitize;
 pub mod sub_agent;
 pub mod sub_agent_tool;
 pub mod compression;
+pub mod pipeline;
 
 pub use agent::*;
 pub use approval::*;
