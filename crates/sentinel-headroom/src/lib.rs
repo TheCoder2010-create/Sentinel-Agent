@@ -1,3 +1,4 @@
+pub mod cache_optimizer;
 pub mod classifier;
 pub mod strategies;
 pub mod ccr;
@@ -25,6 +26,8 @@ pub use metrics::{CompressionMetrics, estimate_tokens as metrics_estimate_tokens
 pub use orchestrator::*;
 pub use integration::*;
 pub use config::*;
+pub use cache_optimizer::{CacheOptimizer, LlmProvider, OptimizedMessages};
+pub use config::CacheOptimizerConfig;
 pub use cache_aligner::*;
 pub use intelligent_context::{IntelligentContext, ScoredMessage, ScoredConversation};
 pub use compress::{Compressor, CompressionResult, CompressionMetadata};

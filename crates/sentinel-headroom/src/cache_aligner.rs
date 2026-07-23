@@ -51,6 +51,11 @@ fn temp_dir_re() -> &'static Regex {
     ).unwrap())
 }
 
+static BLANK_LINE_RE: OnceLock<Regex> = OnceLock::new();
+fn blank_line_re() -> &'static Regex {
+    BLANK_LINE_RE.get_or_init(|| Regex::new(r"\n\s*\n\s*\n+").unwrap())
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct DynamicContext {
     pub dates: Vec<String>,
@@ -144,21 +149,38 @@ pub struct CacheAlignedPrompt {
 pub struct CacheAligner {
     config: CacheAlignmentConfig,
     previous_context: Option<DynamicContext>,
+    compiled_custom: Vec<Regex>,
 }
 
 impl CacheAligner {
     pub fn new(config: CacheAlignmentConfig) -> Self {
-        Self { config, previous_context: None }
+        let compiled_custom = config.custom_patterns.iter()
+            .filter_map(|p| Regex::new(p).ok())
+            .collect();
+        Self { config, previous_context: None, compiled_custom }
     }
 
     pub fn with_previous(previous: DynamicContext) -> Self {
         Self {
             config: CacheAlignmentConfig::default(),
             previous_context: Some(previous),
+            compiled_custom: Vec::new(),
         }
     }
 
+    fn normalize(&self, text: &str) -> String {
+        let mut s = text.to_string();
+        if self.config.normalize_whitespace {
+            s = s.split_whitespace().collect::<Vec<_>>().join(" ");
+        }
+        if self.config.collapse_blank_lines {
+            s = blank_line_re().replace_all(&s, "\n\n").to_string();
+        }
+        s
+    }
+
     pub fn align(&mut self, content: &str) -> CacheAlignedPrompt {
+        let normalized = self.normalize(content);
         let mut ctx = DynamicContext {
             dates: Vec::new(),
             times: Vec::new(),
@@ -169,11 +191,11 @@ impl CacheAligner {
             temp_dirs: Vec::new(),
         };
 
-        let mut result = content.to_string();
+        let mut result = normalized;
         let mut placeholders: Vec<(String, String)> = Vec::new();
 
         if self.config.extract_dates {
-            for cap in date_re().find_iter(content) {
+            for cap in date_re().find_iter(&result.clone()) {
                 let val = cap.as_str().to_string();
                 if !ctx.dates.contains(&val) {
                     ctx.dates.push(val.clone());
@@ -183,8 +205,8 @@ impl CacheAligner {
             }
         }
 
-        let content_for_time = result.clone();
         if self.config.extract_dates {
+            let content_for_time = result.clone();
             for cap in time_re().find_iter(&content_for_time) {
                 let val = cap.as_str().to_string();
                 if !ctx.times.contains(&val) {
@@ -196,7 +218,7 @@ impl CacheAligner {
         }
 
         if self.config.extract_file_paths {
-            for cap in filepath_re().find_iter(content) {
+            for cap in filepath_re().find_iter(&result.clone()) {
                 let val = cap.as_str().to_string();
                 if !ctx.file_paths.contains(&val) {
                     ctx.file_paths.push(val.clone());
@@ -207,7 +229,7 @@ impl CacheAligner {
         }
 
         if self.config.extract_uuids {
-            for cap in uuid_re().find_iter(content) {
+            for cap in uuid_re().find_iter(&result.clone()) {
                 let val = cap.as_str().to_string();
                 if !ctx.uuids.contains(&val) {
                     ctx.uuids.push(val.clone());
@@ -218,7 +240,7 @@ impl CacheAligner {
         }
 
         if self.config.extract_versions {
-            for cap in version_re().find_iter(content) {
+            for cap in version_re().find_iter(&result.clone()) {
                 let val = cap.as_str().to_string();
                 if !ctx.versions.contains(&val) {
                     ctx.versions.push(val.clone());
@@ -229,7 +251,7 @@ impl CacheAligner {
         }
 
         if self.config.extract_user_context {
-            for cap in user_context_re().find_iter(content) {
+            for cap in user_context_re().find_iter(&result.clone()) {
                 let val = cap.as_str().to_string();
                 if !ctx.user_context.contains(&val) {
                     ctx.user_context.push(val.clone());
@@ -238,12 +260,22 @@ impl CacheAligner {
         }
 
         if self.config.extract_file_paths {
-            for cap in temp_dir_re().find_iter(content) {
+            for cap in temp_dir_re().find_iter(&result.clone()) {
                 let val = cap.as_str().to_string();
                 if !ctx.temp_dirs.contains(&val) {
                     ctx.temp_dirs.push(val.clone());
                     let ph = format!("<TEMP_{}>", ctx.temp_dirs.len());
                     placeholders.push((val, ph));
+                }
+            }
+        }
+
+        if !self.compiled_custom.is_empty() {
+            for re in &self.compiled_custom {
+                for cap in re.find_iter(&result.clone()) {
+                    let val = cap.as_str().to_string();
+                    let ph = format!("<CUSTOM_{}>", placeholders.len() + 1);
+                    placeholders.push((val.clone(), ph));
                 }
             }
         }
@@ -387,5 +419,34 @@ mod tests {
         let mut aligner = CacheAligner::new(CacheAlignmentConfig::default());
         let result = aligner.align("Hello, how are you?");
         assert!(result.context.is_empty(), "no dynamic content should be empty");
+    }
+
+    #[test]
+    fn test_normalize_whitespace() {
+        let mut aligner = CacheAligner::new(CacheAlignmentConfig { normalize_whitespace: true, collapse_blank_lines: false, ..Default::default() });
+        let result = aligner.align("hello    world\n\n\n  test");
+        assert!(result.static_prefix.contains("hello world"), "should normalize spaces: {:?}", result.static_prefix);
+    }
+
+    #[test]
+    fn test_collapse_blank_lines() {
+        let mut aligner = CacheAligner::new(CacheAlignmentConfig { normalize_whitespace: false, collapse_blank_lines: true, ..Default::default() });
+        let result = aligner.align("a\n\n\n\n\nb");
+        assert!(!result.static_prefix.contains("\n\n\n\n"), "should collapse blanks: {:?}", result.static_prefix);
+        assert!(result.static_prefix.contains("a\n\nb"), "should keep one blank: {:?}", result.static_prefix);
+    }
+
+    #[test]
+    fn test_custom_patterns() {
+        let cfg = CacheAlignmentConfig {
+            custom_patterns: vec![r"\bFOO\d+\b".to_string()],
+            extract_dates: false, extract_file_paths: false, extract_uuids: false,
+            extract_versions: false, extract_user_context: false,
+            normalize_whitespace: false, collapse_blank_lines: false,
+            ..Default::default()
+        };
+        let mut aligner = CacheAligner::new(cfg);
+        let result = aligner.align("test FOO123 bar");
+        assert!(result.static_prefix.contains("<CUSTOM_"), "should replace custom: {:?}", result.static_prefix);
     }
 }

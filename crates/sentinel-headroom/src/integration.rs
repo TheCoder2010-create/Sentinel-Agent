@@ -179,6 +179,7 @@ pub fn create_headroom_compressor_with_config(
     let headroom_config = crate::config::HeadroomConfig {
         content_routing: rc,
         cache_alignment: config.cache_alignment.clone(),
+        cache_optimizer: config.cache_optimizer.clone(),
         intelligent_context: config.intelligent_context.clone(),
         ccr: config.ccr.clone(),
     };

@@ -3,6 +3,7 @@ use crate::classifier::ContentType;
 #[derive(Clone)]
 pub struct HeadroomConfig {
     pub cache_alignment: CacheAlignmentConfig,
+    pub cache_optimizer: CacheOptimizerConfig,
     pub content_routing: ContentRoutingConfig,
     pub intelligent_context: IntelligentContextConfig,
     pub ccr: CcrConfig,
@@ -18,6 +19,7 @@ impl Default for HeadroomConfig {
     fn default() -> Self {
         Self {
             cache_alignment: CacheAlignmentConfig::default(),
+            cache_optimizer: CacheOptimizerConfig::default(),
             content_routing: ContentRoutingConfig::default(),
             intelligent_context: IntelligentContextConfig::default(),
             ccr: CcrConfig::default(),
@@ -34,6 +36,9 @@ pub struct CacheAlignmentConfig {
     pub extract_versions: bool,
     pub extract_user_context: bool,
     pub delta_tracking: bool,
+    pub normalize_whitespace: bool,
+    pub collapse_blank_lines: bool,
+    pub custom_patterns: Vec<String>,
 }
 
 impl Default for CacheAlignmentConfig {
@@ -46,6 +51,28 @@ impl Default for CacheAlignmentConfig {
             extract_versions: true,
             extract_user_context: true,
             delta_tracking: true,
+            normalize_whitespace: true,
+            collapse_blank_lines: true,
+            custom_patterns: Vec::new(),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct CacheOptimizerConfig {
+    pub enabled: bool,
+    pub auto_detect_provider: bool,
+    pub force_provider: crate::cache_optimizer::LlmProvider,
+    pub min_cacheable_tokens: usize,
+}
+
+impl Default for CacheOptimizerConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            auto_detect_provider: true,
+            force_provider: crate::cache_optimizer::LlmProvider::Unknown,
+            min_cacheable_tokens: 1024,
         }
     }
 }
@@ -137,7 +164,7 @@ impl Default for CcrConfig {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Message {
     pub role: MessageRole,
     pub content: String,

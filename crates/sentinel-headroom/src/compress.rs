@@ -1,11 +1,13 @@
 use std::sync::Arc;
 use crate::cache_aligner::CacheAligner;
+use crate::cache_optimizer::CacheOptimizer;
 use crate::config::*;
 use crate::intelligent_context::IntelligentContext;
 use crate::orchestrator::ContentCompressor;
 
 pub struct Compressor {
     cache_aligner: CacheAligner,
+    cache_optimizer: CacheOptimizer,
     content_router: Arc<ContentCompressor>,
     intelligent_context: IntelligentContext,
     config: HeadroomConfig,
@@ -16,6 +18,7 @@ impl Compressor {
         let content_router = Arc::new(ContentCompressor::from_config(&config));
         Self {
             cache_aligner: CacheAligner::new(config.cache_alignment.clone()),
+            cache_optimizer: CacheOptimizer::new(config.cache_optimizer.clone()),
             content_router,
             intelligent_context: IntelligentContext::new(config.intelligent_context.clone()),
             config,
@@ -26,6 +29,7 @@ impl Compressor {
         let content_router = Arc::new(ContentCompressor::with_ccr_and_config(ccr, &config));
         Self {
             cache_aligner: CacheAligner::new(config.cache_alignment.clone()),
+            cache_optimizer: CacheOptimizer::new(config.cache_optimizer.clone()),
             content_router,
             intelligent_context: IntelligentContext::new(config.intelligent_context.clone()),
             config,
@@ -36,7 +40,7 @@ impl Compressor {
         &self.content_router
     }
 
-    pub async fn compress(&mut self, messages: Vec<Message>) -> CompressionResult {
+    pub async fn compress(&mut self, messages: Vec<Message>, model: &str) -> CompressionResult {
         let total_messages = messages.len();
         let total_input_chars: usize = messages.iter().map(|m| m.content.len()).sum();
         let total_input_tokens = messages.iter().map(|m| crate::intelligent_context::estimate_tokens(&m.content)).sum();
@@ -111,6 +115,15 @@ impl Compressor {
 
         let total_output_chars: usize = transformed.iter().map(|m| m.content.len()).sum();
         let total_output_tokens: usize = transformed.iter().map(|m| crate::intelligent_context::estimate_tokens(&m.content)).sum();
+
+        let cache_summary = if self.config.cache_optimizer.enabled {
+            let opt = self.cache_optimizer.optimize(transformed.clone(), model);
+            let summary = opt.summary;
+            transformed = opt.messages;
+            Some(summary)
+        } else {
+            None
+        };
 
         let intelligence_result = if self.config.intelligent_context.enabled {
             Some(self.intelligent_context.score(transformed.clone()))
@@ -191,6 +204,7 @@ impl Compressor {
                 cacheable_prefix_bytes: total_cacheable_prefixes,
                 dynamic_suffix_bytes: total_dynamic_suffixes,
                 content_compressed_count: total_content_compressed,
+                cache_summary,
                 ccr_keys,
                 roles: transformed_roles,
                 intelligent_dropped: intelligence_result.as_ref().map(|r| r.dropped_count).unwrap_or(0),
@@ -220,6 +234,7 @@ pub struct CompressionMetadata {
     pub cacheable_prefix_bytes: usize,
     pub dynamic_suffix_bytes: usize,
     pub content_compressed_count: usize,
+    pub cache_summary: Option<String>,
     pub ccr_keys: Vec<String>,
     pub roles: Vec<String>,
     pub intelligent_dropped: usize,
@@ -257,7 +272,7 @@ mod tests {
             msg(MessageRole::System, "You are a helpful assistant."),
             msg(MessageRole::User, "Hello!"),
         ];
-        let result = compressor.compress(messages).await;
+        let result = compressor.compress(messages, "test-model").await;
         assert_eq!(result.metadata.total_input_messages, 2);
         assert_eq!(result.metadata.total_output_messages, 2);
     }
@@ -270,7 +285,7 @@ mod tests {
             msg(MessageRole::System, "Today is 2026-07-22. User: alice."),
             msg(MessageRole::User, "Run tests."),
         ];
-        let result = compressor.compress(messages).await;
+        let result = compressor.compress(messages, "test-model").await;
         let sys = &result.messages[0];
         assert!(sys.content.contains("DATE"), "system prompt should have aligned dates: {:?}", sys.content);
     }
@@ -291,7 +306,7 @@ mod tests {
             msg(MessageRole::System, "You are a coding assistant."),
             tool_msg("read", &code),
         ];
-        let result = compressor.compress(messages).await;
+        let result = compressor.compress(messages, "test-model").await;
         let tool_result = &result.messages[1];
         if tool_result.content.len() < code.len() {
             assert!(result.metadata.content_compressed_count >= 1, "should compress tool output");
@@ -321,7 +336,7 @@ mod tests {
             msg(MessageRole::User, "this is a much longer message that should be dropped"),
             msg(MessageRole::User, "tiny"),
         ];
-        let result = compressor.compress(messages).await;
+        let result = compressor.compress(messages, "test-model").await;
         assert!(result.metadata.intelligent_dropped > 0, "should drop messages when over budget");
         assert!(result.metadata.total_output_messages < result.metadata.total_input_messages);
     }
@@ -351,7 +366,7 @@ mod tests {
             msg(MessageRole::User, "ERROR: critical failure"),
             msg(MessageRole::User, "c"),
         ];
-        let result = compressor.compress(messages).await;
+        let result = compressor.compress(messages, "test-model").await;
         let has_error = result.messages.iter().any(|m| m.content.contains("ERROR"));
         assert!(has_error, "should preserve error messages");
     }
@@ -360,7 +375,7 @@ mod tests {
     async fn test_compress_empty_input() {
         let config = HeadroomConfig::default();
         let mut compressor = Compressor::new(config);
-        let result = compressor.compress(vec![]).await;
+        let result = compressor.compress(vec![], "test-model").await;
         assert_eq!(result.metadata.total_input_messages, 0);
         assert!(result.messages.is_empty());
     }
@@ -370,9 +385,9 @@ mod tests {
         let config = HeadroomConfig::default();
         let mut compressor = Compressor::new(config);
         let msgs1 = vec![msg(MessageRole::System, "Today is 2026-07-22.")];
-        let _r1 = compressor.compress(msgs1).await;
+        let _r1 = compressor.compress(msgs1, "test-model").await;
         let msgs2 = vec![msg(MessageRole::System, "Today is 2026-07-22.")];
-        let r2 = compressor.compress(msgs2).await;
+        let r2 = compressor.compress(msgs2, "test-model").await;
         assert!(r2.messages[0].content.contains("no change"), "second call should detect no change: {:?}", r2.messages[0].content);
     }
 
@@ -399,7 +414,7 @@ mod tests {
             msg(MessageRole::User, "this is a much longer message that should definitely be dropped due to budget constraints"),
             msg(MessageRole::User, "tiny"),
         ];
-        let result = compressor.compress(messages).await;
+        let result = compressor.compress(messages, "test-model").await;
         assert!(result.metadata.intelligent_dropped > 0, "should drop messages");
         assert_eq!(result.metadata.ccr_dropped_refs.len(), result.metadata.intelligent_dropped.min(20),
             "dropped refs count should match dropped messages up to 20");
@@ -417,7 +432,7 @@ mod tests {
             msg(MessageRole::System, "help"),
             tool_msg("read", &code),
         ];
-        let result = compressor.compress(messages).await;
+        let result = compressor.compress(messages, "test-model").await;
         let tool = &result.messages[1];
         assert!(tool.content.contains("ccr:") || tool.content.contains("headroom"),
             "compressed tool output should contain ccr reference: {}", tool.content);
