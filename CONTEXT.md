@@ -1,7 +1,7 @@
 # Platform-Agent
 
 > **GitHub**: `Single-Core-Labs/Sentinel-Agent`
-> **CLI**: `sentinel ai` (entry point: `agent.main:sentinel_cli` → subcommand `ai` calls `agent.main:cli`)
+> **CLI**: `sentinel ai` (Rust binary via `crates/sentinel-cli`)
 
 ---
 
@@ -162,14 +162,11 @@ User Message → [ContextManager]
 
 | Path | Purpose |
 |---|---|
-| `agent/shell.py` | CLI shell (REPL, headless mode, session mgmt) |
-| `agent/loop.py` | Agentic loop (plan → act → observe) |
-| `agent/context.py` | Context manager (compaction, diff-only, prompt cache) |
-| `agent/router.py` | Tool Router + Model Router |
-| `agent/gate.py` | Approval gate (Slack, CLI) |
-| `agent/tools/` | Tool implementations by category |
-| `agent/core/plan.py` | Structured Plan/PlanStep + Phase enum |
-| `agent/core/model_router.py` | Cheap/strong model switching |
-| `agent/tools/git_tools.py` | git_status, git_diff, git_commit |
-| `agent/config.py` | Configuration |
-| `agent/main.py` | Entry point |
+| `crates/sentinel-cli/src/main.rs` | CLI dispatcher (sentinel binary) |
+| `crates/sentinel-cli/src/ai.rs` | Interactive agent session |
+| `crates/sentinel-cli/src/exec.rs` | Headless agent execution |
+| `crates/sentinel-core/src/agent.rs` | Agent loop, budget, context |
+| `crates/sentinel-tools/src/` | Tool implementations |
+| `crates/sentinel-provider/src/` | LLM provider abstraction |
+| `crates/sentinel-config/src/` | Configuration loading |
+| `crates/sentinel-ai-tui/src/` | Terminal UI (ratatui) |

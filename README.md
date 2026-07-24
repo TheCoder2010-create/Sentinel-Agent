@@ -15,25 +15,25 @@ Describe a problem in plain English, and the agent investigates with real tools 
 **Repository:** `Single-Core-Labs/Sentinel-Agent1`  
 **Python package:** `sentinel-agent`  
 **Node package:** `sentinel-ai`  
-**CLI commands:** `platform-agent` / `sentinel-ai`
+**CLI command:** `sentinel` (Rust)
 
 ---
 
 ## Quick Start
 
-### Python CLI (agent loop)
+### Rust CLI (agent command)
 
 ```bash
 git clone https://github.com/Single-Core-Labs/Sentinel-Agent1.git
 cd Sentinel-Agent1
-uv sync
-uv tool install -e .
+# Build and install the Rust CLI
+cargo install --path crates/sentinel-cli
 ```
 
-Now `platform-agent` (or `sentinel-ai`) works from any directory:
+Now `sentinel ai` works from any directory:
 
 ```bash
-platform-agent
+sentinel ai
 ```
 
 Create a `.env` file in the project root (or export these in your shell):
@@ -69,33 +69,33 @@ sentinel-ai
 #### Interactive mode (start a chat session):
 
 ```bash
-platform-agent
+sentinel ai
 ```
 
 #### Headless mode (single prompt, auto-approve):
 
 ```bash
-platform-agent "debug why the production model deployment on k8s is crash-looping"
+sentinel ai "debug why the production model deployment on k8s is crash-looping"
 ```
 
 **Options:**
 
 ```bash
-platform-agent --sandbox-tools "your prompt"              # use sandbox tools
-platform-agent --max-iterations 100 "your prompt"
-platform-agent --no-stream "your prompt"
-platform-agent --model openai/gpt-4o "your prompt"
+sentinel ai --sandbox-tools "your prompt"              # use sandbox tools (if supported)
+sentinel ai --max-iterations 100 "your prompt"
+sentinel ai --no-stream "your prompt"
+sentinel ai --model openai/gpt-4o "your prompt"
 ```
 
-Run `platform-agent` then `/model` to see the full list of suggested model ids.
+Run `sentinel ai` then `/model` to see the full list of suggested model ids.
 
 #### Local models
 
 Local model support uses OpenAI-compatible HTTP endpoints through LiteLLM:
 
 ```bash
-platform-agent --model ollama/llama3.1:8b "your prompt"
-platform-agent --model vllm/meta-llama/Llama-3.1-8B-Instruct "your prompt"
+sentinel ai --model ollama/llama3.1:8b "your prompt"
+sentinel ai --model vllm/meta-llama/Llama-3.1-8B-Instruct "your prompt"
 ```
 
 Supported local prefixes: `ollama/`, `vllm/`, `lm_studio/`, `llamacpp/`.

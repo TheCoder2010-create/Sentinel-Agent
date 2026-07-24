@@ -3,7 +3,7 @@ import TextInput from 'ink-text-input';
 import { useState, useCallback, useRef } from 'react';
 import { THEMES, type ThemeConfig } from './theme.js';
 import { MockEventEmitter, type AgentEvent, type PlanItem } from './events/mock-emitter.js';
-import { IPCEventEmitter } from './events/ipc-emitter.js';
+// import { IPCEventEmitter } from './events/ipc-emitter.js'; // Python IPC emitter removed
 import { RealEventEmitter } from './events/real-emitter.js';
 import { StartupSequence } from './components/startup-sequence.js';
 import { ProviderPicker } from './components/provider-picker.js';
@@ -16,7 +16,7 @@ type AppPhase = 'startup' | 'provider-picker' | 'model-picker' | 'main';
 type Mode = 'plan' | 'executing' | 'idle' | 'key_required';
 
 const USE_MOCK = process.env['SENTINEL_MOCK'] === '1' || process.argv.includes('--mock');
-const USE_IPC  = process.env['SENTINEL_IPC'] === '1'  || process.argv.includes('--ipc');
+const USE_IPC = false; // Python IPC disabled
 
 let _counter = 0;
 const uid = (prefix = 'i') => `${prefix}-${++_counter}`;
@@ -269,11 +269,7 @@ export default function App() {
     toolMapRef.current.clear();
     assistIdRef.current = null;
 
-    const emitter: Emitter = USE_MOCK
-      ? new MockEventEmitter()
-      : USE_IPC
-        ? new IPCEventEmitter()
-        : new RealEventEmitter();
+    const emitter: Emitter = USE_MOCK ? new MockEventEmitter() : new RealEventEmitter();
     emitterRef.current = emitter;
     emitter.on('event', handleEvent);
     emitter.start(selectedModel, apiKey, model?.provider);

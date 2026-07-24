@@ -1,4 +1,4 @@
-# platform-agent / sentinel-ai — Frontend Context
+# sentinel ai — Frontend Context
 
 ## Entry Point
 
@@ -148,35 +148,6 @@ Keyboard: `Ctrl+C` once = interrupt, `Ctrl+C` twice within 1.5s = exit.
 
 ---
 
-## BACKEND INTEGRATION — NVIDIA NIM
-
-### agent/core/model_ids.py
-
-```python
-NVIDIA_NEMOTRON_70B_MODEL_ID = "nvidia/llama-3.1-nemotron-70b-instruct"
-NVIDIA_NEMOTRON_SUPER_49B_MODEL_ID = "nvidia/llama-3.3-nemotron-super-49b"
-NVIDIA_NEMOTRON_340B_MODEL_ID = "nvidia/nemotron-4-340b-instruct"
-# Added to HOSTED_MODEL_IDS set
-```
-
-### agent/core/llm_params.py
-
-```python
-def _is_nim_model(model_id: str) -> bool:
-    return model_id.startswith("nvidia/")
-```
-
-NIM models are detected by the `nvidia/` prefix and routed via LiteLLM's `nvidia_nim/` provider prefix with `NVIDIA_NIM_API_KEY` from env var.
-
-### Required env var
-```
-NVIDIA_NIM_API_KEY=nvapi-...
-```
-
-NIM uses the OpenAI-compatible endpoint at `https://integrate.api.nvidia.com/v1` (handled by LiteLLM internally).
-
----
-
 ## Key File Map
 
 ```
@@ -188,8 +159,7 @@ frontend/
 │   ├── app.tsx                # App: phase machine, event dispatch, commands
 │   ├── theme.ts               # Theme configs
 │   ├── events/
-│   │   ├── mock-emitter.ts    # MockEventEmitter (17-event script)
-│   │   └── ipc-emitter.ts     # IPCEventEmitter (backend IPC)
+│   │   └── mock-emitter.ts    # MockEventEmitter (test script)
 │   └── components/
 │       ├── startup-sequence.tsx  # Particle animation + boot lines
 │       ├── model-picker.tsx      # Arrow-key model selection list

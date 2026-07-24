@@ -2,7 +2,7 @@
 
 ## Local Dev Servers
 
-- Agent (CLI): run `uv run python -m agent.main` or install with `uv tool install -e .` then `sentinel ai`.
+- Agent (CLI): build with `cargo install --path crates/sentinel-cli` then run `sentinel ai`.
 - Frontend: from `frontend/`, run `npm ci` if dependencies are missing, then `npm run dev`.
 - Backend: from `backend/`, run `uv run uvicorn main:app --host ::1 --port 7860`.
 - Frontend URL: http://localhost:5173/
@@ -19,8 +19,7 @@ Notes:
 
 ## Development Checks
 
-- Before every commit, run `uv run ruff check .` and `uv run ruff format --check .`.
-- If formatting fails, run `uv run ruff format .`, then re-run the Ruff checks before committing.
+- Before every commit, run `cargo check` to verify Rust compilation.
 
 ## Git Workflow
 

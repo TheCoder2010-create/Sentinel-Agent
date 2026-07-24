@@ -25,7 +25,6 @@ assignees: ''
 - OS: [e.g. Windows 11, macOS 14, Ubuntu 22.04]
 - Rust version: `rustc --version`
 - CLI version: `sentinel --version`
-- Python version (if using agent/): `python --version`
 
 ## Logs / Screenshots
 
