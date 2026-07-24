@@ -335,6 +335,11 @@ impl App {
                     serde_json::json!({ "text": format!("Model: {} | Messages: {} | YOLO: {}", self.model, chat_len, if self.yolo_mode { "ON" } else { "OFF" }) }),
                 ));
             }
+            "/local" => {
+                self.boot_visible = false;
+                let model = parts.get(1).map(|s| s.to_string());
+                self.run_local_setup(model).await;
+            }
             "/quit" => {
                 self.should_quit = true;
             }
@@ -345,6 +350,95 @@ impl App {
                     serde_json::json!({ "message": format!("Unknown: {cmd}. Type /help") }),
                 ));
             }
+        }
+    }
+
+    async fn run_local_setup(&mut self, model_override: Option<String>) {
+        use tokio::task::spawn_blocking;
+        let chat = self.chat.clone();
+
+        chat.lock().await.append(sentinel_ai_exec::ThreadEvent::new(
+            "thinking",
+            serde_json::json!({ "text": "🔍 Detecting system..." }),
+        ));
+
+        let info = spawn_blocking(crate::local_model::detect_system).await.unwrap_or_else(|_| crate::local_model::SystemInfo::default());
+        let info_text = crate::local_model::format_system_info(&info);
+
+        chat.lock().await.append(sentinel_ai_exec::ThreadEvent::new(
+            "thinking",
+            serde_json::json!({ "text": info_text }),
+        ));
+
+        if !info.has_ollama {
+            chat.lock().await.append(sentinel_ai_exec::ThreadEvent::new(
+                "thinking",
+                serde_json::json!({ "text": "⬇️  Ollama not found. Downloading and installing..." }),
+            ));
+            match spawn_blocking(crate::local_model::install_ollama).await {
+                Ok(msg) => {
+                    let msg_text = msg.unwrap_or_else(|e| format!("Install warning: {}", e));
+                    chat.lock().await.append(sentinel_ai_exec::ThreadEvent::new(
+                        "thinking",
+                        serde_json::json!({ "text": format!("✅ {}", msg_text) }),
+                    ));
+                }
+                Err(e) => {
+                    chat.lock().await.append(sentinel_ai_exec::ThreadEvent::new(
+                        "error",
+                        serde_json::json!({ "message": format!("Install failed: {}", e) }),
+                    ));
+                    return;
+                }
+            }
+        }
+
+        chat.lock().await.append(sentinel_ai_exec::ThreadEvent::new(
+            "thinking",
+            serde_json::json!({ "text": "🔄 Ensuring Ollama is running..." }),
+        ));
+
+        if let Err(e) = spawn_blocking(crate::local_model::ensure_ollama_running).await.unwrap_or(Err(anyhow::anyhow!("blocking error"))) {
+            chat.lock().await.append(sentinel_ai_exec::ThreadEvent::new(
+                "error",
+                serde_json::json!({ "message": format!("Ollama start failed: {}", e) }),
+            ));
+            return;
+        }
+
+        let existing = spawn_blocking(crate::local_model::list_local_models).await
+            .unwrap_or_else(|_| Ok(vec![]))
+            .unwrap_or_else(|_| vec![]);
+        let chosen = model_override.unwrap_or_else(|| {
+            if info.gpu.is_some() && info.memory_gb >= 8.0 {
+                "llama3.2:3b".into()
+            } else if info.memory_gb >= 4.0 {
+                "llama3.2:1b".into()
+            } else {
+                "tinyllama".into()
+            }
+        });
+        let model_name = chosen.clone();
+
+        let prefix = model_name.split(':').next().unwrap_or(&model_name).to_string();
+        if existing.iter().any(|m| m.as_str().starts_with(&prefix)) {
+            chat.lock().await.append(sentinel_ai_exec::ThreadEvent::new(
+                "completed",
+                serde_json::json!({ "text": format!("✅ Model `{}` already pulled. Ready!", model_name) }),
+            ));
+        } else {
+            chat.lock().await.append(sentinel_ai_exec::ThreadEvent::new(
+                "thinking",
+                serde_json::json!({ "text": format!("📦 Pulling `{}` (this may take a while)...", model_name) }),
+            ));
+            let model_name_for_display = model_name.clone();
+            let pull_result = spawn_blocking(move || crate::local_model::pull_model(&model_name)).await;
+            let (typ, json) = match pull_result {
+                Ok(Ok(text)) => ("completed", serde_json::json!({ "text": format!("{}\n\nSet model with `/model {}`", text, model_name_for_display) })),
+                Ok(Err(e)) => ("error", serde_json::json!({ "message": format!("Pull failed: {}", e) })),
+                Err(e) => ("error", serde_json::json!({ "message": format!("Background task failed: {}", e) })),
+            };
+            chat.lock().await.append(sentinel_ai_exec::ThreadEvent::new(typ, json));
         }
     }
 
